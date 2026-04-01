@@ -97,6 +97,15 @@ OmegaMatrix(matrix::Matrix{Float64},
 function OmegaMatrix(matrix::AbstractMatrix, eta_names::Vector{Symbol};
                      diagonal::Bool = false)
     m = collect(Symmetric(matrix))
+    # During line search, extreme parameter values can produce Inf/NaN matrices.
+    # Fall back to a small identity so the optimizer gets a finite (large) OFV
+    # and backtracks rather than crashing.
+    if !all(isfinite, m)
+        n    = size(m, 1)
+        m_fb = Matrix{Float64}(I, n, n) .* 1e-4
+        L_fb = LowerTriangular(Matrix{Float64}(I, n, n) .* sqrt(1e-4))
+        return OmegaMatrix(m_fb, L_fb, eta_names, diagonal)
+    end
     C = cholesky(Symmetric(m), check=false)
     if issuccess(C)
         return OmegaMatrix(m, LowerTriangular(collect(C.L)), eta_names, diagonal)
@@ -129,9 +138,18 @@ Complete set of population parameters at a given iteration.
 struct ModelParameters
     theta::Vector{Float64}
     theta_names::Vector{Symbol}
+    theta_lower::Vector{Float64}   # lower bounds for each theta (enforced via Fminbox)
+    theta_upper::Vector{Float64}   # upper bounds for each theta
     omega::OmegaMatrix
     sigma::SigmaMatrix
 end
+
+# Backward-compatible constructor without explicit bounds (used by unpack_params, tests, etc.)
+ModelParameters(theta, theta_names, omega, sigma) =
+    ModelParameters(theta, theta_names,
+                    fill(1e-9, length(theta)),
+                    fill(1e9,  length(theta)),
+                    omega, sigma)
 
 # ---------------------------------------------------------------------------
 # Compiled model (produced by parser)
@@ -159,6 +177,10 @@ struct CompiledModel
     n_epsilon::Int
     theta_names::Vector{Symbol}
     eta_names::Vector{Symbol}
+
+    # Default initial parameters built from the [parameters] block.
+    # Used by fit(model, population) when no init_params are supplied.
+    default_params::ModelParameters
 end
 
 # ---------------------------------------------------------------------------

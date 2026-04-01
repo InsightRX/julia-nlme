@@ -286,6 +286,49 @@ function _codegen_pk_param_fn(lines::Vector{String},
 end
 
 # ---------------------------------------------------------------------------
+# Build ModelParameters from parsed specs
+# ---------------------------------------------------------------------------
+
+function _build_init_params(theta_specs::Vector{ThetaSpec},
+                              omega_specs::Vector{OmegaSpec},
+                              sigma_specs::Vector{SigmaSpec})
+    theta_vals  = [s.initial for s in theta_specs]
+    theta_names = [s.name    for s in theta_specs]
+    theta_lower = [s.lower   for s in theta_specs]
+    theta_upper = [s.upper   for s in theta_specs]
+
+    eta_names = Symbol[]
+    for spec in omega_specs, name in spec.names
+        push!(eta_names, name)
+    end
+    n_eta = length(eta_names)
+
+    omega_mat = zeros(n_eta, n_eta)
+    for spec in omega_specs
+        n = length(spec.names)
+        if n == 1
+            i = findfirst(==(spec.names[1]), eta_names)
+            omega_mat[i, i] = spec.values[1]
+        else
+            idxs = [findfirst(==(name), eta_names) for name in spec.names]
+            k = 1
+            for col in 1:n, row in col:n
+                i, j = idxs[row], idxs[col]
+                omega_mat[i, j] = spec.values[k]
+                omega_mat[j, i] = spec.values[k]
+                k += 1
+            end
+        end
+    end
+
+    omega = OmegaMatrix(omega_mat, eta_names)
+    sigma = SigmaMatrix([s.value for s in sigma_specs],
+                         [s.name  for s in sigma_specs])
+
+    return ModelParameters(theta_vals, theta_names, theta_lower, theta_upper, omega, sigma)
+end
+
+# ---------------------------------------------------------------------------
 # Top-level parse function
 # ---------------------------------------------------------------------------
 
@@ -328,8 +371,9 @@ function parse_model_string(content::AbstractString)::CompiledModel
                    fn_body)
     pk_param_fn = @RuntimeGeneratedFunction(fn_expr)
 
-    theta_names = [s.name for s in theta_specs]
-    n_epsilon   = length(sigma_specs)
+    theta_names   = [s.name for s in theta_specs]
+    n_epsilon     = length(sigma_specs)
+    default_params = _build_init_params(theta_specs, omega_specs, sigma_specs)
 
     return CompiledModel(
         model_name,
@@ -340,6 +384,7 @@ function parse_model_string(content::AbstractString)::CompiledModel
         length(eta_names),
         n_epsilon,
         theta_names,
-        eta_names
+        eta_names,
+        default_params
     )
 end

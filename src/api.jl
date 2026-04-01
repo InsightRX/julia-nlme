@@ -6,51 +6,7 @@ Primary entry point:
   result = fit(model, population, init_params; kwargs...)
 """
 
-# ---------------------------------------------------------------------------
-# Build ModelParameters from parsed specs
-# ---------------------------------------------------------------------------
-
-function _build_init_params(theta_specs, omega_specs, sigma_specs)
-    theta_vals  = [s.initial for s in theta_specs]
-    theta_names = [s.name    for s in theta_specs]
-
-    # Assemble eta names in order
-    eta_names = Symbol[]
-    for spec in omega_specs, name in spec.names
-        push!(eta_names, name)
-    end
-    n_eta = length(eta_names)
-
-    # Build Ω matrix from specs
-    omega_mat = zeros(n_eta, n_eta)
-    eta_offset = 0
-    for spec in omega_specs
-        n = length(spec.names)
-        if n == 1
-            # Single diagonal element
-            i = findfirst(==(spec.names[1]), eta_names)
-            omega_mat[i, i] = spec.values[1]
-        else
-            # Lower-triangle block: values are [var1, cov12, var2, cov13, cov23, var3, ...]
-            idxs = [findfirst(==(name), eta_names) for name in spec.names]
-            k = 1
-            for col in 1:n, row in col:n
-                i, j = idxs[row], idxs[col]
-                omega_mat[i, j] = spec.values[k]
-                omega_mat[j, i] = spec.values[k]
-                k += 1
-            end
-        end
-    end
-
-    omega = OmegaMatrix(omega_mat, eta_names)
-
-    sigma_vals  = [s.value for s in sigma_specs]
-    sigma_names = [s.name  for s in sigma_specs]
-    sigma = SigmaMatrix(sigma_vals, sigma_names)
-
-    return ModelParameters(theta_vals, theta_names, omega, sigma)
-end
+import Random
 
 # ---------------------------------------------------------------------------
 # Post-estimation diagnostics
@@ -104,36 +60,63 @@ function fit(model_path::AbstractString,
 end
 
 """
-    fit(model, population; init_params=nothing, kwargs...)
+    fit(model, population; kwargs...)
+
+Fit using the initial parameter values defined in the model file's `[parameters]` block.
+Equivalent to `fit(model, population, model.default_params; kwargs...)`.
+"""
+function fit(model::CompiledModel, population::Population; kwargs...)::FitResult
+    return fit(model, population, model.default_params; kwargs...)
+end
+
+"""
+    fit(model, population, init_params; kwargs...)
 
 Fit a compiled model to a population dataset.
 
 Keyword arguments:
-  - `init_params`:        `ModelParameters` with initial values. If `nothing`,
-                          values are taken from the model file's [parameters] block.
-  - `outer_maxiter`:      maximum outer iterations (default 500)
-  - `outer_gtol`:         gradient tolerance for outer loop (default 1e-4)
-  - `inner_maxiter`:      max inner iterations per subject (default 200)
+  - `outer_maxiter`:       maximum outer iterations (default 500)
+  - `outer_gtol`:          gradient tolerance for outer loop (default 1e-6)
+  - `inner_maxiter`:       max inner iterations per subject (default 200)
+  - `inner_tol`:           inner EBE convergence tolerance (default 1e-8)
   - `run_covariance_step`: compute SEs via Hessian inversion (default true)
-  - `interaction`:        use FOCE-I (eta-epsilon interaction); evaluates R at IPRED
-                          instead of PRED. Recommended for proportional/combined error
-                          models. (default false = standard FOCE)
-  - `verbose`:            print iteration progress (default true)
+  - `interaction`:         use FOCE-I (eta-epsilon interaction); evaluates R at IPRED
+                           instead of PRED. Recommended for proportional/combined error
+                           models. (default false = standard FOCE)
+  - `verbose`:             print iteration progress (default true)
+  - `n_starts`:            number of optimization starts (default 1). When > 1, uses
+                           Latin Hypercube Sampling across the parameter bounds to
+                           generate space-filling starting points and returns the result
+                           with the lowest OFV.
+  - `rng`:                 random number generator used for LHS start generation.
+  - `optimizer`:           local optimizer. `:lbfgs` (default), `:bfgs`, or any NLopt
+                           gradient-based symbol (`:LD_SLSQP`, `:LD_MMA`, etc.).
+  - `lbfgs_memory`:        L-BFGS history length (default 5). Smaller = more aggressive
+                           Hessian resets. Only used when `optimizer=:lbfgs`.
+  - `global_search`:       run a gradient-free global pre-search (NLopt GN_CRS2_LM)
+                           before the local optimizer to identify the correct basin
+                           (default false). Most useful for a single-start run.
+  - `global_maxeval`:      max evaluations for the global phase (default 200 × n_params).
 """
 function fit(model::CompiledModel,
              population::Population,
              init_params::ModelParameters;
              outer_maxiter::Int = 500,
-             outer_gtol::Float64 = 1e-4,
+             outer_gtol::Float64 = 1e-6,
              inner_maxiter::Int = 200,
-             inner_tol::Float64 = 1e-6,
+             inner_tol::Float64 = 1e-8,
              run_covariance_step::Bool = true,
              interaction::Bool = false,
-             verbose::Bool = true)::FitResult
+             verbose::Bool = true,
+             n_starts::Int = 1,
+             rng::Random.AbstractRNG = Random.default_rng(),
+             optimizer::Symbol = :lbfgs,
+             lbfgs_memory::Int = 5,
+             global_search::Bool = false,
+             global_maxeval::Int = 0)::FitResult
 
+    # Validate covariates once (shared across all starts)
     warnings = String[]
-
-    # Validate covariates
     for subject in population.subjects
         for cov in _infer_required_covariates(model)
             if !haskey(subject.covariates, cov)
@@ -143,14 +126,56 @@ function fit(model::CompiledModel,
         end
     end
 
+    # ---------------------------------------------------------------------------
+    # Multi-start: run n_starts optimizations, pick lowest OFV, then do one
+    # final fit from those params (converges immediately) to get the covariance step.
+    # ---------------------------------------------------------------------------
+    if n_starts > 1
+        starts    = _lhs_starts(init_params, n_starts, rng)
+        best_params = init_params
+        best_ofv    = Inf
+
+        for (k, params_k) in enumerate(starts)
+            verbose && @info @sprintf("Multi-start: run %d / %d", k, n_starts)
+            try
+                fp, st, _, _, _ = optimize_population(
+                    population, model, params_k;
+                    outer_maxiter, outer_gtol, inner_maxiter, inner_tol,
+                    run_covariance_step = false, interaction, optimizer, lbfgs_memory,
+                    global_search, global_maxeval,
+                    verbose = false)
+                ofv_k = 2 * st.best_ofv
+                verbose && @info @sprintf("  → OFV = %.3f", ofv_k)
+                if isfinite(ofv_k) && ofv_k < best_ofv
+                    best_ofv    = ofv_k
+                    best_params = fp
+                end
+            catch e
+                verbose && @warn "Multi-start run $k failed: $e"
+            end
+        end
+
+        verbose && @info @sprintf("Multi-start best OFV = %.3f — polishing...", best_ofv)
+        # Recurse as single-start from best params (runs covariance step once).
+        return fit(model, population, best_params;
+                   outer_maxiter, outer_gtol, inner_maxiter, inner_tol,
+                   run_covariance_step, interaction, verbose, optimizer, lbfgs_memory,
+                   n_starts = 1)
+    end
+
+    # ---------------------------------------------------------------------------
+    # Single-start path (also used as the final polishing step above)
+    # ---------------------------------------------------------------------------
     final_params, state, optim_result, covar, se_all =
         optimize_population(population, model, init_params;
                              outer_maxiter, outer_gtol,
                              inner_maxiter, inner_tol,
-                             run_covariance_step, interaction, verbose)
+                             run_covariance_step, interaction, verbose,
+                             optimizer, lbfgs_memory,
+                             global_search, global_maxeval)
 
     append!(warnings, state.inner_warnings)
-    converged = Optim.converged(optim_result)
+    converged = optim_result.converged
 
     if !converged
         push!(warnings, "Outer optimizer did not converge — results may be unreliable")
@@ -160,15 +185,18 @@ function fit(model::CompiledModel,
     sub_results = _compute_subject_results(population, model, final_params,
                                             state.eta_hats, state.H_mats; interaction)
 
-    n_obs     = sum(s -> length(s.observations), population.subjects)
-    n_params  = n_packed(final_params)
-    ofv       = state.last_ofv
-    aic       = ofv + 2 * n_params
-    bic       = ofv + n_params * log(n_obs)
+    n_obs    = sum(s -> length(s.observations), population.subjects)
+    n_params = n_packed(final_params)
+    n_theta  = length(final_params.theta)
+    n_eta    = n_etas(final_params.omega)
 
-    # Split SE vector into theta/omega/sigma parts
-    n_theta = length(final_params.theta)
-    n_eta   = n_etas(final_params.omega)
+    # OFV = 2 × NLL, matching NONMEM's convention.
+    # NONMEM does not include the n_obs×log(2π) normalisation constant in its
+    # reported OFV — it is a constant w.r.t. parameters and cancels in model
+    # comparisons. Omitting it keeps OFV values directly comparable to NONMEM output.
+    ofv = 2 * state.best_ofv
+    aic = ofv + 2 * n_params
+    bic = ofv + n_params * log(n_obs)
     n_chol  = final_params.omega.diagonal ? n_eta : n_eta * (n_eta + 1) ÷ 2
     n_sigma = length(final_params.sigma.values)
 
@@ -189,7 +217,7 @@ function fit(model::CompiledModel,
         n_obs,
         length(population),
         n_params,
-        Optim.iterations(optim_result),
+        optim_result.iterations,
         interaction,
         warnings
     )
@@ -215,6 +243,58 @@ end
 # Placeholder — actual implementation inspects the compiled model's param function AST
 # For now, return an empty list (covariate injection is handled with defaults)
 _infer_required_covariates(::CompiledModel) = Symbol[]
+
+# ---------------------------------------------------------------------------
+# Multi-start helper
+# ---------------------------------------------------------------------------
+
+"""
+    _lhs_starts(template, n_starts, rng)
+
+Generate `n_starts` starting points using Latin Hypercube Sampling over the
+optimizer's box bounds in packed (log-scale) space.
+
+LHS divides each dimension into `n_starts` equal-probability intervals and
+places exactly one sample per interval, with intervals shuffled independently
+across dimensions. This guarantees uniform marginal coverage of the parameter
+space — unlike Gaussian jitter, which clusters near the initial point — and
+requires far fewer starts to achieve comparable exploration.
+
+The first returned point is always `x0` (the user's initial params).
+"""
+function _lhs_starts(template::ModelParameters,
+                      n_starts::Int,
+                      rng::Random.AbstractRNG)
+    x0, lower, upper = initial_packed(template)
+    n = length(x0)
+
+    starts = Vector{Vector{Float64}}(undef, n_starts)
+    starts[1] = x0
+
+    for k in 2:n_starts
+        x_k = Vector{Float64}(undef, n)
+        for j in 1:n
+            # Divide [lower[j], upper[j]] into n_starts intervals;
+            # sample uniformly from interval k (with random offset).
+            lo_j = lower[j] + (k - 1) / n_starts * (upper[j] - lower[j])
+            hi_j = lower[j] +  k      / n_starts * (upper[j] - lower[j])
+            x_k[j] = lo_j + rand(rng) * (hi_j - lo_j)
+        end
+        starts[k] = x_k
+    end
+
+    # Shuffle the interval assignments independently across dimensions
+    # so starts aren't all along the diagonal of the parameter space.
+    for j in 1:n
+        perm = Random.randperm(rng, n_starts - 1) .+ 1   # shuffle starts 2..n
+        vals_j = [starts[k][j] for k in 2:n_starts]
+        for (i, k) in enumerate(perm)
+            starts[k][j] = vals_j[i]
+        end
+    end
+
+    return [unpack_params(x, template) for x in starts]
+end
 
 # ---------------------------------------------------------------------------
 # simulate() — forward simulation from a FitResult or given parameters

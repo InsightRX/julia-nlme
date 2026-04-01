@@ -1,0 +1,45 @@
+# Two-compartment IV infusion PK model — matches NONMEM run18
+#
+# Allometric exponents (fixed, not estimated):
+#   CL, Q: exponent = 0  → no FFM effect (only CRCL drives CL)
+#   V1, V2: exponent = 1 → linear FFM scaling
+#
+# CRCL: Cockcroft-Gault with FFM, pre-computed as CRCLf column
+#   CRCLf = (140-AGE) * FFM * (0.85^SEX) / (72*CREAT)
+#
+# Error: combined proportional + additive
+#   Var(y|IPRED) = (IPRED * sqrt(PROP_ERR))^2 + ADD_ERR
+
+model TwoCptInfusion_CRCL_FFM
+
+  [description]
+    name    = "2-CMT IV infusion with CRCL (time-varying) and FFM"
+    dataset = "nmdata_20230216_1"
+
+  [parameters]
+    theta TVCL(4.0,   0.1,  50.0)
+    theta TVV1(50.0,  1.0, 500.0)
+    theta TVQ(3.0,    0.1,  50.0)
+    theta TVV2(50.0,  1.0, 500.0)
+    theta THETA_CRCL(0.5,  0.01, 3.0)   # CRCL effect on CL
+
+    omega ETA_CL ~ 0.10
+    omega ETA_V1 ~ 0.10
+    omega ETA_V2 ~ 0.10
+
+    sigma PROP_ERR ~ 0.04     # proportional variance (sigma_prop^2)
+    sigma ADD_ERR  ~ 0.25     # additive variance     (sigma_add^2, units: (mg/L)^2)
+
+  [individual_parameters]
+    CL = TVCL * (CRCLF / 100.0)^THETA_CRCL * exp(ETA_CL)
+    V1 = TVV1 * (FFM   /  70.0)             * exp(ETA_V1)
+    Q  = TVQ
+    V2 = TVV2 * (FFM   /  70.0)             * exp(ETA_V2)
+
+  [structural_model]
+    pk two_cpt_infusion(cl=CL, v1=V1, q=Q, v2=V2)
+
+  [error_model]
+    DV ~ combined(PROP_ERR, ADD_ERR)
+
+end

@@ -4,6 +4,27 @@ Likelihood functions for NLME estimation.
 The individual log-likelihood (Laplacian approximation) is used in the inner
 η-optimization. The FOCE approximation of the population objective function
 is used in the outer optimization over θ, Ω, σ.
+
+FOCE (no interaction, interaction=false) — paper eq. 15:
+  NLL = 0.5 × [(y-f0)ᵀ R̃⁻¹ (y-f0) + log|R̃|]
+  where f0 = f(η̂) - H·η̂,  R̃ = H Ω Hᵀ + R(f0)
+
+FOCEI (interaction=true) — paper eq. 20, simplified via matrix determinant lemma:
+  NLL = 0.5 × [(y-IPRED)ᵀ V⁻¹ (y-IPRED) + η̂ᵀΩ⁻¹η̂ + log|R̃|]
+  where IPRED = f(η̂),  V = R(IPRED),  R̃ = H Ω Hᵀ + V
+
+The simplification uses the identity:
+  log|Ω| + log|Φᵢ| + log|Ω⁻¹ + HᵀV⁻¹H| = log|HΩHᵀ + V| = log|R̃|
+(matrix determinant lemma), so the three Ω-dependent terms in eq. 20 reduce to
+log|R̃|, and Φᵢ = log|V| + (y-IPRED)ᵀV⁻¹(y-IPRED) contributes its log|V|
+which cancels with the -log|V| from the lemma, leaving only
+(y-IPRED)ᵀV⁻¹(y-IPRED). The remaining explicit Ω term is η̂ᵀΩ⁻¹η̂, which
+(together with log|R̃|) prevents Ω from collapsing to zero.
+
+OFV constant for both approximations:
+  OFV = 2 × NLL + n_obs × log(2π)
+The n_eta × log(2π) from the η prior and from the Laplace correction cancel
+exactly, so only the n_obs observation dimension contributes.
 """
 
 using LinearAlgebra, LogExpFunctions
@@ -96,25 +117,25 @@ function individual_nll(eta::AbstractVector{T},
 end
 
 # ---------------------------------------------------------------------------
-# FOCE per-subject objective (linearized)
+# FOCE / FOCEI per-subject objective
 # ---------------------------------------------------------------------------
 
 """
-    foce_subject_nll(eta_hat, H, subject, params, model)
+    foce_subject_nll(eta_hat, H, subject, params, model; interaction)
 
-FOCE (First-Order Conditional Estimation) negative log-likelihood contribution
-for one subject, evaluated at the EBE η̂.
+FOCE or FOCEI negative log-likelihood contribution for one subject.
 
-Uses first-order Taylor expansion of f around η̂:
-  f̃(η) ≈ f(η̂) + H·(η - η̂)
+**FOCE (interaction=false)** — linearized marginal likelihood (paper eq. 15):
+  NLL = 0.5 × [(y-f0)ᵀ R̃⁻¹ (y-f0) + log|R̃|]
 
-Population prediction:  f̃(0) = f(η̂) - H·η̂
-Linearized R̃ = diag(V(f̃(0))) + H·Ω·Hᵀ  (scalar diagonal V)
+**FOCEI (interaction=true)** — NONMEM Laplace / FOCEI (paper eq. 20),
+simplified via the matrix determinant lemma:
+  NLL = 0.5 × [(y-IPRED)ᵀ V⁻¹ (y-IPRED) + η̂ᵀΩ⁻¹η̂ + log|R̃|]
 
-Note: R̃ is only diagonal when V depends on ipred and the error model is
-proportional or additive. The full matrix form (H·Ω·Hᵀ + R) is used.
+See module docstring for the simplification derivation.
 
-Returns a scalar T (Dual-compatible).
+Both formulations use R̃ = H Ω Hᵀ + V where V is the diagonal residual
+variance evaluated at the appropriate reference point.
 """
 function foce_subject_nll(eta_hat::Vector{Float64},
                             H::Matrix{Float64},
@@ -123,45 +144,44 @@ function foce_subject_nll(eta_hat::Vector{Float64},
                             model::CompiledModel;
                             interaction::Bool = false)
 
-    T = Float64
-    ipred_hat = compute_predictions(model, subject,
-                                     params.theta, eta_hat)
-
-    # Linearized pop prediction (η = 0 in Taylor expansion)
-    f0 = ipred_hat .- H * eta_hat     # f̃(0)
-
-    # FOCE: R evaluated at population prediction f0
-    # FOCE-I: R evaluated at individual prediction ipred_hat (eta-epsilon interaction)
-    R_ref  = interaction ? ipred_hat : f0
-    R_diag = compute_R_diag(model.error_model, R_ref, params.sigma.values)
-    R = Diagonal(R_diag)
-
-    # Total linearized covariance: R̃ = H·Ω·Hᵀ + R
+    ipred_hat = compute_predictions(model, subject, params.theta, eta_hat)
     Ω = params.omega.matrix
-    R_tilde = H * Ω * H' .+ Matrix(R)   # n×n
 
-    y = subject.observations
-    resid = y .- f0
+    if interaction
+        # FOCEI: R evaluated at individual prediction
+        V_diag  = compute_R_diag(model.error_model, ipred_hat, params.sigma.values)
+        R_tilde = H * Ω * H' .+ Matrix(Diagonal(V_diag))
 
-    # Use Cholesky of R̃ for log-det and solve
-    C_Rt = cholesky(Symmetric(R_tilde), check=false)
-    if !issuccess(C_Rt)
-        return Inf   # signal failure to optimizer
+        C_Rt = cholesky(Symmetric(R_tilde), check=false)
+        issuccess(C_Rt) || return Inf
+        logdet_Rt = 2 * sum(log.(diag(C_Rt.L)))
+
+        # Non-linearized residual from IPRED
+        y        = subject.observations
+        resid    = y .- ipred_hat
+        quad_obs = dot(resid, resid ./ V_diag)
+
+        # η̂ᵀΩ⁻¹η̂ — params.omega.chol is already LowerTriangular
+        eta_w    = params.omega.chol \ eta_hat
+        quad_eta = sum(abs2, eta_w)
+
+        return 0.5 * (quad_obs + quad_eta + logdet_Rt)
+    else
+        # FOCE: R evaluated at linearized population prediction f0
+        f0     = ipred_hat .- H * eta_hat
+        V_diag = compute_R_diag(model.error_model, f0, params.sigma.values)
+        R_tilde = H * Ω * H' .+ Matrix(Diagonal(V_diag))
+
+        C_Rt = cholesky(Symmetric(R_tilde), check=false)
+        issuccess(C_Rt) || return Inf
+
+        y     = subject.observations
+        resid = y .- f0
+        quad_resid = dot(resid, C_Rt \ resid)
+        logdet_Rt  = 2 * sum(log.(diag(C_Rt.L)))
+
+        return 0.5 * (quad_resid + logdet_Rt)
     end
-
-    # (yᵢ - f̃₀)ᵀ R̃⁻¹ (yᵢ - f̃₀)
-    quad_resid = dot(resid, C_Rt \ resid)
-
-    # η̂ᵀ Ω⁻¹ η̂
-    C_Ω = params.omega.chol
-    eta_w = C_Ω \ eta_hat
-    quad_eta = sum(abs2, eta_w)
-
-    # log-determinants
-    logdet_Rt = 2 * sum(log.(diag(C_Rt.L)))
-    logdet_Ω  = 2 * sum(log.(diag(C_Ω)))
-
-    return 0.5 * (quad_resid + logdet_Rt + quad_eta + logdet_Ω)
 end
 
 # ---------------------------------------------------------------------------
@@ -169,9 +189,9 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    foce_population_nll(params, population, model, eta_hats, H_mats)
+    foce_population_nll(params, population, model, eta_hats, H_mats; interaction)
 
-Sum the FOCE NLL contributions over all subjects for given population
+Sum the FOCE/FOCEI NLL contributions over all subjects for given population
 parameters. `eta_hats` and `H_mats` are held fixed (updated in inner loop).
 
 This is the function whose gradient w.r.t. vectorized(θ, chol(Ω), log(σ))
@@ -192,16 +212,16 @@ function foce_population_nll(params::ModelParameters,
 end
 
 # ---------------------------------------------------------------------------
-# AD-compatible variant for the outer gradient computation
+# AD-compatible variants for the outer gradient computation
 # ---------------------------------------------------------------------------
 # These take raw arrays (theta, omega_mat, sigma_vals) so ForwardDiff Dual
 # numbers can flow through without hitting ModelParameters{Float64} walls.
 
 """
-    foce_subject_nll_raw(eta_hat, H, subject, theta, omega_mat, sigma_vals, model)
+    foce_subject_nll_raw(eta_hat, H, subject, theta, omega_mat, sigma_vals, model; interaction)
 
-AD-compatible version of `foce_subject_nll`. Accepts any `AbstractVector{T}` /
-`AbstractMatrix{T}` so ForwardDiff can differentiate w.r.t. (theta, omega, sigma).
+AD-compatible FOCE/FOCEI NLL. Accepts any `AbstractVector{T}` / `AbstractMatrix{T}`
+so ForwardDiff can differentiate w.r.t. (theta, omega, sigma).
 EBEs `eta_hat` and `H` are treated as fixed Float64 constants.
 """
 function foce_subject_nll_raw(eta_hat::Vector{Float64},
@@ -215,41 +235,55 @@ function foce_subject_nll_raw(eta_hat::Vector{Float64},
 
     ipred_hat = compute_predictions(model, subject, theta, T.(eta_hat))
 
-    f0     = ipred_hat .- H * eta_hat
-    R_ref  = interaction ? ipred_hat : f0
-    R_diag = compute_R_diag(model.error_model, R_ref, sigma_vals)
-    R      = Diagonal(R_diag)
+    if interaction
+        # FOCEI (simplified): 0.5 × [(y-IPRED)ᵀV⁻¹(y-IPRED) + η̂ᵀΩ⁻¹η̂ + log|R̃|]
+        V_diag  = compute_R_diag(model.error_model, ipred_hat, sigma_vals)
+        R_tilde = H * omega_mat * H' .+ Matrix(Diagonal(V_diag))
 
-    R_tilde = H * omega_mat * H' .+ Matrix(R)
-    y     = subject.observations
-    resid = T.(y) .- f0
+        R_tilde_sym = Symmetric(R_tilde)
+        C_Rt = cholesky(R_tilde_sym, check=false)
+        if !issuccess(C_Rt)
+            return T(1e20)
+        end
+        logdet_Rt = 2 * sum(log.(diag(C_Rt.L)))
 
-    # Cholesky for log-det and solve; fall back to a large value if not PD
-    R_tilde_sym = Symmetric(R_tilde)
-    C_Rt = cholesky(R_tilde_sym, check=false)
-    if !issuccess(C_Rt)
-        return T(1e20)
+        y        = subject.observations
+        resid    = T.(y) .- ipred_hat
+        quad_obs = dot(resid, resid ./ V_diag)
+
+        # η̂ᵀΩ⁻¹η̂ — use LU solve (omega_mat \ eta_hat) rather than a second
+        # Cholesky factorisation. cholesky() on Dual-typed matrices can silently
+        # fail issuccess() in some Julia versions, producing a zero gradient.
+        # LU-based \ is reliably differentiable through ForwardDiff.
+        eta_w    = omega_mat \ T.(eta_hat)
+        quad_eta = dot(T.(eta_hat), eta_w)
+
+        return T(0.5) * (quad_obs + quad_eta + logdet_Rt)
+    else
+        # FOCE (linearized)
+        f0     = ipred_hat .- H * eta_hat
+        V_diag = compute_R_diag(model.error_model, f0, sigma_vals)
+        R_tilde = H * omega_mat * H' .+ Matrix(Diagonal(V_diag))
+
+        R_tilde_sym = Symmetric(R_tilde)
+        C_Rt = cholesky(R_tilde_sym, check=false)
+        if !issuccess(C_Rt)
+            return T(1e20)
+        end
+
+        y     = subject.observations
+        resid = T.(y) .- f0
+        quad_resid = dot(resid, C_Rt \ resid)
+        logdet_Rt  = 2 * sum(log.(diag(C_Rt.L)))
+
+        return T(0.5) * (quad_resid + logdet_Rt)
     end
-
-    quad_resid = dot(resid, C_Rt \ resid)
-    logdet_Rt  = 2 * sum(log.(diag(C_Rt.L)))
-
-    # η̂ᵀ Ω⁻¹ η̂  via Cholesky of omega_mat
-    C_Ω = cholesky(Symmetric(omega_mat), check=false)
-    if !issuccess(C_Ω)
-        return T(1e20)
-    end
-    eta_w    = C_Ω.L \ T.(eta_hat)
-    quad_eta = sum(abs2, eta_w)
-    logdet_Ω = 2 * sum(log.(diag(C_Ω.L)))
-
-    return T(0.5) * (quad_resid + logdet_Rt + quad_eta + logdet_Ω)
 end
 
 """
-    foce_population_nll_diff(theta, omega_mat, sigma_vals, population, model, eta_hats, H_mats)
+    foce_population_nll_diff(theta, omega_mat, sigma_vals, population, model, eta_hats, H_mats; interaction)
 
-AD-compatible population FOCE NLL. Used in the outer gradient computation with
+AD-compatible population FOCE/FOCEI NLL. Used in the outer gradient computation with
 EBEs fixed. Accepts Dual-typed arrays from ForwardDiff.
 """
 function foce_population_nll_diff(theta::AbstractVector{T},

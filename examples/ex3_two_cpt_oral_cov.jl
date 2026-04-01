@@ -111,6 +111,7 @@ model = parse_model_file(joinpath(@__DIR__, "two_cpt_oral_cov.jnlme"))
 result = fit(model, pop, init_params;
              outer_maxiter = 500,
              run_covariance_step = true,
+             interaction = true,
              verbose = true)
 
 print_results(result)

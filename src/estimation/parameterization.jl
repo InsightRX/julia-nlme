@@ -137,12 +137,35 @@ end
 
 Return `(x0, lower, upper)` for the optimizer.
 
-Lower/upper bounds are intentionally wide. The log/Cholesky transforms
-already enforce positivity; bounds just prevent numerical blow-up.
+Theta bounds come from `params.theta_lower/upper` (set from the model file's
+`[parameters]` block). These prevent the optimizer from reaching degenerate
+parameter regions (e.g. CL→0, Q→∞) that are local minima of the FOCE OFV
+for sparse data. Omega and sigma get conservative defaults.
 """
 function initial_packed(params::ModelParameters)
-    x0    = pack_params(params)
-    lower = fill(-10.0, length(x0))
-    upper = fill(10.0,  length(x0))
+    x0 = pack_params(params)
+
+    n_eta   = n_etas(params.omega)
+    n_chol  = params.omega.diagonal ? n_eta : n_eta * (n_eta + 1) ÷ 2
+    n_sigma = length(params.sigma.values)
+
+    # Theta: log-transformed → bounds are log(theta_lower/upper)
+    lower_theta = log.(max.(params.theta_lower, 1e-10))
+    upper_theta = log.(min.(params.theta_upper, 1e9))
+
+    # Omega Cholesky elements: diagonal stored as log(L_ii), off-diagonal unconstrained.
+    # Lower bound -4.0 → L_ii ≥ exp(-4) → ω_ii ≥ exp(-8) ≈ 3e-4.
+    # This blocks the log|Ω|→-∞ degenerate minimum while allowing any real PK
+    # variability (NONMEM run18 omega values 0.07–0.57 are far above this floor).
+    lower_omega = fill(-4.0, n_chol)
+    upper_omega = fill(3.0,  n_chol)
+
+    # Sigma: log-transformed; allow from exp(-8)≈3e-4 to exp(5)≈148
+    lower_sigma = fill(-8.0, n_sigma)
+    upper_sigma = fill(5.0,  n_sigma)
+
+    lower = vcat(lower_theta, lower_omega, lower_sigma)
+    upper = vcat(upper_theta, upper_omega, upper_sigma)
+
     return x0, lower, upper
 end

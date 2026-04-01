@@ -8,7 +8,7 @@ using Newton's method with ForwardDiff-computed gradients and Hessian.
 Also computes the Jacobian H = ∂f/∂η|_{η̂} needed for FOCE linearization.
 """
 
-using ForwardDiff, Optim, LinearAlgebra
+using ForwardDiff, Optim, LinearAlgebra, Logging
 
 # ---------------------------------------------------------------------------
 # Find EBE for a single subject
@@ -43,17 +43,27 @@ function find_ebe(subject::Subject,
         nothing
     end
 
+    # Suppress Optim's "NaN in gradient" warnings: they are expected when the
+    # line search explores extreme η values and the individual NLL is undefined
+    # there. The optimizer recovers automatically. NullLogger is safe here
+    # because find_ebe itself emits no @info or @warn messages.
+    # with_logger alone is not sufficient when called from Threads.@threads
+    # tasks (which don't reliably inherit the parent task's logger state).
     result = try
-        Optim.optimize(
-            obj, grad!, eta0,
-            BFGS(linesearch = Optim.LineSearches.BackTracking()),
-            Optim.Options(iterations = maxiter, g_tol = tol, show_trace = false)
-        )
+        with_logger(NullLogger()) do
+            Optim.optimize(
+                obj, grad!, eta0,
+                BFGS(linesearch = Optim.LineSearches.BackTracking()),
+                Optim.Options(iterations = maxiter, g_tol = tol, show_trace = false)
+            )
+        end
     catch
         # Fall back to gradient-free Nelder-Mead if BFGS fails
         try
-            Optim.optimize(obj, eta0, NelderMead(),
-                           Optim.Options(iterations = maxiter*10, g_tol = tol, show_trace = false))
+            with_logger(NullLogger()) do
+                Optim.optimize(obj, eta0, NelderMead(),
+                               Optim.Options(iterations = maxiter*10, g_tol = tol, show_trace = false))
+            end
         catch
             return eta0, zeros(length(subject.observations), n_eta), false
         end
