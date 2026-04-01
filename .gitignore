@@ -1,0 +1,11 @@
+# Julia artifacts
+Manifest.toml
+*.jl.cov
+*.jl.mem
+/deps/deps.jl
+
+# Generated outputs
+examples/*.png
+
+# OS
+.DS_Store

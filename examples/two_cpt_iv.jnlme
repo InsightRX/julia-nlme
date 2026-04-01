@@ -1,0 +1,33 @@
+# Two-compartment IV bolus PK model
+
+model TwoCptIV
+
+  [parameters]
+    # THETA: name(initial, lower, upper)
+    theta TVCL(5.0,  0.1, 100.0)
+    theta TVV1(15.0, 0.5, 500.0)
+    theta TVQ( 3.0,  0.1,  50.0)
+    theta TVV2(30.0, 0.5, 500.0)
+
+    # OMEGA: between-subject variability (variance scale)
+    omega ETA_CL ~ 0.10
+    omega ETA_V1 ~ 0.10
+    omega ETA_Q  ~ 0.10
+    omega ETA_V2 ~ 0.10
+
+    # SIGMA: residual error variance
+    sigma PROP_ERR ~ 0.01
+
+  [individual_parameters]
+    CL = TVCL * exp(ETA_CL)
+    V1 = TVV1 * exp(ETA_V1)
+    Q  = TVQ  * exp(ETA_Q)
+    V2 = TVV2 * exp(ETA_V2)
+
+  [structural_model]
+    pk two_cpt_iv_bolus(cl=CL, v1=V1, q=Q, v2=V2)
+
+  [error_model]
+    DV ~ proportional(PROP_ERR)
+
+end
