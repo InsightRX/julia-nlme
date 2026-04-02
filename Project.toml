@@ -4,6 +4,7 @@ authors = ["InsightRX"]
 version = "0.1.0"
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -24,6 +25,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TidierPlots = "337ecbd1-5042-4e2a-ae6f-ca776f97570a"
 
 [compat]
+ArgParse = "1.2.0"
 NLopt = "1.2.1"
 Plots = "1.41.6"
 Test = "1.11.0"

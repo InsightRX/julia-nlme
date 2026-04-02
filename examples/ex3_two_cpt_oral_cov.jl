@@ -112,6 +112,7 @@ result = fit(model, pop, init_params;
              outer_maxiter = 500,
              run_covariance_step = true,
              interaction = true,
+             optimizer = :bfgs,
              verbose = true)
 
 print_results(result)

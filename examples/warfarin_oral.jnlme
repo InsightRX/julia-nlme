@@ -11,7 +11,7 @@ model WarfarinOneCmt
     # THETA: name(initial, lower, upper)
     theta TVCL(0.134, 0.001, 10.0)
     theta TVV(8.1,   0.1,   100.0)
-    theta TVKA(1.0,  0.01,  10.0)
+    theta TVKA(1.0,  0.1,  10.0)
 
     # OMEGA: between-subject variability (variance scale)
     omega ETA_CL ~ 0.07

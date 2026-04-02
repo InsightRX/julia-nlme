@@ -1,0 +1,22 @@
+# .jnlme — project-level settings for JuliaNLME
+# Place this file in your working directory.
+# CLI arguments always take precedence over values here.
+
+[estimation]
+optimizer = "lbfgs"          # lbfgs | bfgs | LD_SLSQP | LD_MMA | LD_TNEWTON_PRECOND_RESTART
+interaction = false          # true = FOCE-I (recommended for proportional/combined error)
+outer_maxiter = 500
+inner_maxiter = 200
+inner_tol = 1e-8
+outer_gtol = 1e-6
+run_covariance_step = true
+n_starts = 1                 # >1 = Latin Hypercube multi-start
+global_search = false        # true = GN_CRS2_LM global pre-search
+verbose = true
+
+# [data]
+# covariate_columns = ["wt", "age", "sex"]   # omit to auto-detect
+
+[output]
+directory = "."              # where to write output files
+# prefix = "run1"            # filename prefix; defaults to model basename

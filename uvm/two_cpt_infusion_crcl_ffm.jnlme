@@ -27,8 +27,8 @@ model TwoCptInfusion_CRCL_FFM
     omega ETA_V1 ~ 0.10
     omega ETA_V2 ~ 0.10
 
-    sigma PROP_ERR ~ 0.04     # proportional variance (sigma_prop^2)
-    sigma ADD_ERR  ~ 0.25     # additive variance     (sigma_add^2, units: (mg/L)^2)
+    sigma PROP_ERR ~ 0.04        # proportional variance (sigma_prop^2)
+    sigma ADD_ERR  ~ 0.25 fix    # additive variance     (sigma_add^2, units: (mg/L)^2)
 
   [individual_parameters]
     CL = TVCL * (CRCLF / 100.0)^THETA_CRCL * exp(ETA_CL)

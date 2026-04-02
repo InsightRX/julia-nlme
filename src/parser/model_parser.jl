@@ -72,16 +72,19 @@ struct ThetaSpec
     initial::Float64
     lower::Float64
     upper::Float64
+    fixed::Bool
 end
 
 struct OmegaSpec
     names::Vector{Symbol}
     values::Vector{Float64}   # diagonal if length == 1, or lower-triangle
+    fixed::Bool
 end
 
 struct SigmaSpec
     name::Symbol
     value::Float64
+    fixed::Bool
 end
 
 """
@@ -99,9 +102,12 @@ function _parse_parameters(lines::Vector{String})
     omegas = OmegaSpec[]
     sigmas = SigmaSpec[]
 
+    _is_fixed(line) = occursin(r"\bfix(ed)?\b"i, line)
+
     for line in lines
         line = strip(line)
         startswith(line, '#') && continue
+        fixed = _is_fixed(line)
 
         # theta NAME(init, lower, upper) or theta NAME(init)
         m = match(r"^theta\s+(\w+)\(([^)]+)\)", line)
@@ -111,7 +117,7 @@ function _parse_parameters(lines::Vector{String})
             init  = parse(Float64, strip(parts[1]))
             lower = length(parts) >= 2 ? parse(Float64, strip(parts[2])) : 1e-9
             upper = length(parts) >= 3 ? parse(Float64, strip(parts[3])) : Inf
-            push!(thetas, ThetaSpec(name, init, lower, upper))
+            push!(thetas, ThetaSpec(name, init, lower, upper, fixed))
             continue
         end
 
@@ -120,7 +126,7 @@ function _parse_parameters(lines::Vector{String})
         if m !== nothing
             names  = [Symbol(strip(s)) for s in split(m.captures[1], ',')]
             values = [parse(Float64, strip(s)) for s in split(m.captures[2], ',')]
-            push!(omegas, OmegaSpec(names, values))
+            push!(omegas, OmegaSpec(names, values, fixed))
             continue
         end
 
@@ -129,7 +135,7 @@ function _parse_parameters(lines::Vector{String})
         if m !== nothing
             name  = Symbol(m.captures[1])
             value = parse(Float64, m.captures[2])
-            push!(omegas, OmegaSpec([name], [value]))
+            push!(omegas, OmegaSpec([name], [value], fixed))
             continue
         end
 
@@ -138,7 +144,7 @@ function _parse_parameters(lines::Vector{String})
         if m !== nothing
             name  = Symbol(m.captures[1])
             value = parse(Float64, m.captures[2])
-            push!(sigmas, SigmaSpec(name, value))
+            push!(sigmas, SigmaSpec(name, value, fixed))
             continue
         end
     end
@@ -294,8 +300,9 @@ function _build_init_params(theta_specs::Vector{ThetaSpec},
                               sigma_specs::Vector{SigmaSpec})
     theta_vals  = [s.initial for s in theta_specs]
     theta_names = [s.name    for s in theta_specs]
-    theta_lower = [s.lower   for s in theta_specs]
-    theta_upper = [s.upper   for s in theta_specs]
+    # Fixed theta: collapse lower == upper == init so the optimizer cannot move it
+    theta_lower = [s.fixed ? s.initial : s.lower for s in theta_specs]
+    theta_upper = [s.fixed ? s.initial : s.upper for s in theta_specs]
 
     eta_names = Symbol[]
     for spec in omega_specs, name in spec.names
@@ -325,7 +332,36 @@ function _build_init_params(theta_specs::Vector{ThetaSpec},
     sigma = SigmaMatrix([s.value for s in sigma_specs],
                          [s.name  for s in sigma_specs])
 
-    return ModelParameters(theta_vals, theta_names, theta_lower, theta_upper, omega, sigma)
+    # Build packed_fixed: marks which elements of the packed vector are frozen.
+    # Layout mirrors pack_params: [theta..., chol(Ω)..., log(σ)...]
+    n_theta = length(theta_specs)
+    n_chol  = omega.diagonal ? n_eta : n_eta * (n_eta + 1) ÷ 2
+    n_sigma = length(sigma_specs)
+    packed_fixed = falses(n_theta + n_chol + n_sigma)
+
+    # Theta section
+    for (i, spec) in enumerate(theta_specs)
+        packed_fixed[i] = spec.fixed
+    end
+
+    # Omega Cholesky section — mark all elements of a fixed spec's block
+    chol_idx = n_theta + 1
+    for spec in omega_specs
+        n = length(spec.names)
+        n_elems = omega.diagonal ? 1 : n * (n + 1) ÷ 2
+        if spec.fixed
+            packed_fixed[chol_idx : chol_idx + n_elems - 1] .= true
+        end
+        chol_idx += n_elems
+    end
+
+    # Sigma section
+    for (i, spec) in enumerate(sigma_specs)
+        packed_fixed[n_theta + n_chol + i] = spec.fixed
+    end
+
+    return ModelParameters(theta_vals, theta_names, theta_lower, theta_upper,
+                            omega, sigma, packed_fixed)
 end
 
 # ---------------------------------------------------------------------------

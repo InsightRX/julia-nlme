@@ -142,14 +142,20 @@ struct ModelParameters
     theta_upper::Vector{Float64}   # upper bounds for each theta
     omega::OmegaMatrix
     sigma::SigmaMatrix
+    # Which elements of the packed parameter vector are fixed (lower == upper == x0).
+    # Empty vector means nothing is fixed (backward-compatible default).
+    packed_fixed::Vector{Bool}
 end
 
-# Backward-compatible constructor without explicit bounds (used by unpack_params, tests, etc.)
+# Backward-compatible constructors
+ModelParameters(theta, theta_names, lower, upper, omega, sigma) =
+    ModelParameters(theta, theta_names, lower, upper, omega, sigma, Bool[])
+
 ModelParameters(theta, theta_names, omega, sigma) =
     ModelParameters(theta, theta_names,
                     fill(1e-9, length(theta)),
                     fill(1e9,  length(theta)),
-                    omega, sigma)
+                    omega, sigma, Bool[])
 
 # ---------------------------------------------------------------------------
 # Compiled model (produced by parser)

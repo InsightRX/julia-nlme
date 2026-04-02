@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# jnlme — command-line interface for JuliaNLME
+#
+# Usage:
+#   jnlme fit model.jnlme data.csv [options]
+#
+# For fast startup, compile a system image first:
+#   julia --project=<JNLME_ROOT> scripts/build_sysimage.jl
+# This reduces startup from ~10 s to ~1 s.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JNLME_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLI_SCRIPT="$SCRIPT_DIR/jnlme.jl"
+SYSIMAGE="$JNLME_ROOT/build/jnlme.so"
+
+JULIA_FLAGS=(
+    "--project=$JNLME_ROOT"
+    "--startup-file=no"
+    "-O1"
+)
+
+if [ -f "$SYSIMAGE" ]; then
+    JULIA_FLAGS+=("--sysimage=$SYSIMAGE")
+fi
+
+exec julia "${JULIA_FLAGS[@]}" "$CLI_SCRIPT" "$@"

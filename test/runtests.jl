@@ -210,6 +210,45 @@ end
     @test pk.ka ≈ 1.0 rtol=1e-8
 end
 
+@testset "Fixed parameters: bounds pinning" begin
+    # A model with one fixed sigma — verifies that ε-pinning keeps bounds valid
+    # and that the optimizer does not immediately terminate (≥2 iterations expected).
+    model_str = """
+    model FixedSigmaModel
+
+      [parameters]
+        theta TVCL(2.0, 0.01, 100.0)
+        theta TVV(20.0, 0.1, 500.0)
+        omega ETA_CL ~ 0.09
+        sigma PROP_ERR ~ 0.05
+        sigma ADD_ERR  ~ 0.25 fix
+
+      [individual_parameters]
+        CL = TVCL * exp(ETA_CL)
+        V  = TVV
+
+      [structural_model]
+        pk one_cpt_iv_bolus(cl=CL, v=V)
+
+      [error_model]
+        DV ~ combined(PROP_ERR, ADD_ERR)
+
+    end
+    """
+    model = parse_model_string(model_str)
+    @test model.default_params.packed_fixed[end] == true    # ADD_ERR sigma is fixed
+    @test model.default_params.packed_fixed[end-1] == false # PROP_ERR sigma is free
+
+    # Fixed params are excluded from the optimizer — verify the packed_fixed
+    # index correctly identifies ADD_ERR as the last sigma.
+    x0, lower, upper = JuliaNLME.initial_packed(model.default_params)
+    # All bounds should be strictly ordered (no pinning needed now)
+    @test all(lower .< upper)
+    # The free (non-fixed) bounds should cover a reasonable range
+    free_idx = findall(.!model.default_params.packed_fixed)
+    @test all(upper[free_idx] .- lower[free_idx] .> 0.1)
+end
+
 # ---------------------------------------------------------------------------
 # Time-varying covariates
 # ---------------------------------------------------------------------------

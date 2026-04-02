@@ -68,6 +68,7 @@ model = parse_model_file(joinpath(@__DIR__, "warfarin_oral.jnlme"))
 result = fit(model, pop, init_params;
              outer_maxiter=300,
              run_covariance_step=true,
+             optimizer = :LD_SLSQP,
              verbose=true)
 
 print_results(result)

@@ -234,12 +234,49 @@ function optimize_population(population::Population,
                                global_search::Bool = false,
                                global_maxeval::Int = 0)   # 0 → auto: 200 × n_params
 
-    x0, lower, upper = initial_packed(init_params)
+    x0_full, lower_full, upper_full = initial_packed(init_params)
 
     f_only, g_only!, fdfg!, state = make_outer_objective(
         population, model, init_params;
         inner_maxiter, inner_tol, interaction, verbose
     )
+
+    # -------------------------------------------------------------------------
+    # Exclude fixed parameters from the optimizer's search space.
+    # Fixed params have packed_fixed[i] = true; we pass only free dims to the
+    # optimizer. Inside each objective call we expand the free vector back to
+    # the full vector (with fixed values held at x0) before evaluation.
+    # This avoids the 1/ε² Fminbox log-barrier curvature blow-up that would
+    # otherwise dominate the Hessian and stall free-parameter updates.
+    # -------------------------------------------------------------------------
+    free_idx = isempty(init_params.packed_fixed) ?
+        collect(1:length(x0_full)) :
+        findall(.!init_params.packed_fixed)
+
+    x0_fixed = x0_full   # full vector; fixed values never change
+    x0    = x0_full[free_idx]
+    lower = lower_full[free_idx]
+    upper = upper_full[free_idx]
+
+    # Expand a free sub-vector back to the full packed vector.
+    expand(x_free) = (v = copy(x0_fixed); v[free_idx] = x_free; v)
+
+    # Wrap the three objective closures to operate on the free sub-vector.
+    f_free(x_free) = f_only(expand(x_free))
+
+    function g_free!(G_free, x_free)
+        G_full = zeros(length(x0_fixed))
+        g_only!(G_full, expand(x_free))
+        G_free .= G_full[free_idx]
+        nothing
+    end
+
+    function fg_free!(G_free, x_free)
+        G_full = zeros(length(x0_fixed))
+        val = fdfg!(G_full, expand(x_free))
+        G_free .= G_full[free_idx]
+        val
+    end
 
     # -------------------------------------------------------------------------
     # Optional global pre-search via NLopt GN_CRS2_LM (gradient-free).
@@ -248,14 +285,14 @@ function optimize_population(population::Population,
     # It identifies the basin; the local phase then polishes to the minimum.
     # -------------------------------------------------------------------------
     if global_search
-        n = length(x0)
-        max_ev = global_maxeval > 0 ? global_maxeval : 200 * n
+        n_free = length(x0)
+        max_ev = global_maxeval > 0 ? global_maxeval : 200 * n_free
         verbose && @info @sprintf("Global pre-search (GN_CRS2_LM, max %d evals)...", max_ev)
-        opt_g = NLopt.Opt(:GN_CRS2_LM, n)
+        opt_g = NLopt.Opt(:GN_CRS2_LM, n_free)
         NLopt.lower_bounds!(opt_g, lower)
         NLopt.upper_bounds!(opt_g, upper)
         NLopt.maxeval!(opt_g, max_ev)
-        NLopt.min_objective!(opt_g, (x, _) -> f_only(x))
+        NLopt.min_objective!(opt_g, (x, _) -> f_free(x))
         (_, x_global, _) = NLopt.optimize(opt_g, x0)
         verbose && @info @sprintf("  Global phase best OFV = %.3f — starting local polish",
                                    2 * state.best_ofv)
@@ -267,7 +304,7 @@ function optimize_population(population::Population,
         # -----------------------------------------------------------------
         # Optim.jl path (BFGS / L-BFGS via Fminbox)
         # -----------------------------------------------------------------
-        od = OnceDifferentiable(f_only, g_only!, fdfg!, x0)
+        od = OnceDifferentiable(f_free, g_free!, fg_free!, x0)
         inner_opt = optimizer === :bfgs ?
             BFGS(linesearch = Optim.LineSearches.BackTracking()) :
             LBFGS(m = lbfgs_memory, linesearch = Optim.LineSearches.BackTracking())
@@ -290,7 +327,7 @@ function optimize_population(population::Population,
         # NLopt path — any NLopt.jl gradient-based algorithm symbol,
         # e.g. :LD_LBFGS, :LD_SLSQP, :LD_MMA, :LD_TNEWTON_PRECOND_RESTART
         # -----------------------------------------------------------------
-        n = length(x0)
+        n_free = length(x0)
         nlopt_algo = try
             NLopt.Algorithm(optimizer)
         catch
@@ -298,29 +335,28 @@ function optimize_population(population::Population,
                   "gradient-based algorithm symbol such as :LD_LBFGS or :LD_SLSQP.")
         end
 
-        opt = NLopt.Opt(nlopt_algo, n)
+        opt = NLopt.Opt(nlopt_algo, n_free)
         NLopt.lower_bounds!(opt, lower)
         NLopt.upper_bounds!(opt, upper)
-        NLopt.maxeval!(opt, outer_maxiter * (n + 1))   # NLopt counts per f/g call
-        NLopt.xtol_rel!(opt, outer_gtol)               # stop when ‖Δx‖/‖x‖ < gtol
+        NLopt.maxeval!(opt, outer_maxiter * (n_free + 1))  # NLopt counts per f/g call
+        NLopt.xtol_rel!(opt, outer_gtol)                   # stop when ‖Δx‖/‖x‖ < gtol
 
-        G_nlopt = zeros(n)
         n_evals_nlopt = Ref(0)
 
         NLopt.min_objective!(opt, (x, grad) -> begin
             n_evals_nlopt[] += 1
             if length(grad) > 0
-                return fdfg!(grad, x)
+                return fg_free!(grad, x)
             else
-                return f_only(x)
+                return f_free(x)
             end
         end)
 
         (minf, minx, ret) = NLopt.optimize(opt, x0)
 
         # Compute gradient at solution for the g_residual field
-        g_final = zeros(n)
-        g_only!(g_final, minx)
+        g_final = zeros(n_free)
+        g_free!(g_final, minx)
         g_norm = maximum(abs, g_final)
 
         converged_nlopt = ret in (:SUCCESS, :STOPVAL_REACHED,
@@ -329,7 +365,9 @@ function optimize_population(population::Population,
     end
     t_elapsed = time() - t_start
 
-    x_hat        = opt_result.minimizer
+    # Expand the optimizer's free-parameter solution back to the full vector.
+    x_hat_free   = opt_result.minimizer
+    x_hat        = expand(x_hat_free)
     final_params = unpack_params(x_hat, init_params)
 
     if verbose
@@ -360,8 +398,8 @@ function optimize_population(population::Population,
         compute_covariance(x_final, population, model, final_params,
                            eta_final, H_final; interaction)
     else
-        n = length(x0)
-        zeros(n, n), zeros(n), false
+        n_full = length(x0_fixed)
+        zeros(n_full, n_full), Float64[], true   # empty SE = skipped (not failed)
     end
 
     # Warn only if inner failures were very frequent (>50% of evaluations)
@@ -370,7 +408,7 @@ function optimize_population(population::Population,
               "Inner optimizer failed on $(state.n_inner_failures)/$(state.n_evals) evaluations — results may be unreliable")
     end
 
-    if !cov_success
+    if run_covariance_step && !cov_success
         push!(state.inner_warnings, "Covariance step failed — SEs not available")
     end
 
