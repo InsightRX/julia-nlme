@@ -505,4 +505,62 @@ end
     @test result.n_iterations == 60
 end
 
+@testset "Importance sampling: smoke test" begin
+    using Random: MersenneTwister
+    using DataFrames
+
+    model_str = """
+    model ISTest
+      [parameters]
+        theta TVCL(2.0, 0.1, 20.0)
+        theta TVV(20.0, 1.0, 200.0)
+        omega ETA_CL ~ 0.09
+        sigma PROP_ERR ~ 0.01
+      [individual_parameters]
+        CL = TVCL * exp(ETA_CL)
+        V  = TVV
+      [structural_model]
+        pk one_cpt_iv_bolus(cl=CL, v=V)
+      [error_model]
+        DV ~ proportional(PROP_ERR)
+    end
+    """
+    model = parse_model_string(model_str)
+
+    Random.seed!(7)
+    rows = []
+    for id in 1:8
+        push!(rows, (ID=id, TIME=0.0, AMT=100.0, DV=missing, EVID=1, MDV=1))
+        for t in [1.0, 4.0, 8.0, 24.0]
+            cl = 2.5 * exp(0.3 * randn())
+            v  = 20.0
+            dv = (100.0/v) * exp(-(cl/v)*t) * (1 + 0.1*randn())
+            push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.001), EVID=0, MDV=0))
+        end
+    end
+    pop = read_data(DataFrame(rows))
+
+    result = fit(model, pop;
+                 interaction        = true,
+                 run_covariance_step = false,
+                 verbose             = false)
+
+    is = importance_sampling(result, pop;
+                              n_samples = 100,
+                              rng       = MersenneTwister(11),
+                              verbose   = false)
+
+    @test isfinite(is.ofv)
+    @test isfinite(is.aic)
+    @test isfinite(is.bic)
+    @test length(is.per_subject_loglik) == 8
+    @test all(isfinite, is.per_subject_loglik)
+    @test all(>(0), is.ess)
+    @test all(<=(100), is.ess)
+    @test is.n_samples == 100
+    @test is.n_subjects == 8
+    # delta_ofv is stored correctly (foce_ofv − is.ofv)
+    @test is.delta_ofv ≈ is.foce_ofv - is.ofv
+end
+
 println("\nAll tests passed!")
