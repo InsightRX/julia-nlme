@@ -185,6 +185,14 @@ function importance_sampling(result::FitResult,
         collect(1:length(x_hat)) :
         findall(.!template.packed_fixed)
 
+    n_cov = size(result.covariance_matrix, 1)
+    if maximum(free_idx) > n_cov
+        error("Covariance matrix size ($n_cov) is smaller than the packed parameter " *
+              "vector ($(length(x_hat)) elements, $(length(free_idx)) free). " *
+              "This is caused by a parser bug in earlier versions — please re-run fit() " *
+              "with the current version to regenerate the covariance matrix.")
+    end
+
     x_hat_free = x_hat[free_idx]
     C_free     = result.covariance_matrix[free_idx, free_idx]
     L_C        = cholesky(Symmetric(C_free)).L   # for drawing N(0,I) → N(x̂, Ĉ)

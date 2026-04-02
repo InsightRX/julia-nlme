@@ -328,7 +328,11 @@ function _build_init_params(theta_specs::Vector{ThetaSpec},
         end
     end
 
-    omega = OmegaMatrix(omega_mat, eta_names)
+    # Use diagonal packing when every omega spec is a scalar (no covariance blocks).
+    # This ensures pack_params and packed_fixed agree on the number of Cholesky elements.
+    # Mixed or block specs (e.g. omega [ETA_A, ETA_B] ~ [...]) require full packing.
+    all_scalar = all(spec -> length(spec.names) == 1, omega_specs)
+    omega = OmegaMatrix(omega_mat, eta_names; diagonal = all_scalar)
     sigma = SigmaMatrix([s.value for s in sigma_specs],
                          [s.name  for s in sigma_specs])
 
