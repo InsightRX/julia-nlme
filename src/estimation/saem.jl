@@ -241,8 +241,10 @@ function run_saem(population::Population,
     n_iter = n_iter_exploration + n_iter_convergence
 
     # Per-thread RNGs (seeded from master) for thread-safe MH
+    # Use maxthreadid() (not nthreads()) — Julia 1.9+ has multiple thread pools
+    # and threadid() can exceed nthreads() for the default pool.
     thread_rngs = [Random.MersenneTwister(rand(rng, UInt32))
-                   for _ in 1:Threads.nthreads()]
+                   for _ in 1:Threads.maxthreadid()]
 
     # Initialise current estimates
     theta_cur  = copy(init_params.theta)

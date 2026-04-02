@@ -211,8 +211,10 @@ function importance_sampling(result::FitResult,
     ess                = zeros(N)
 
     # Per-thread RNGs for thread safety
+    # Use maxthreadid() (not nthreads()) — Julia 1.9+ has multiple thread pools
+    # and threadid() can exceed nthreads() for the default pool.
     thread_rngs = [Random.MersenneTwister(rand(rng, UInt32))
-                   for _ in 1:Threads.nthreads()]
+                   for _ in 1:Threads.maxthreadid()]
 
     Threads.@threads for i in 1:N
         tid     = Threads.threadid()
