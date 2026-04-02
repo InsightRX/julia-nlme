@@ -153,14 +153,26 @@ function saem_theta_sigma_mstep(population::Population,
 
     obj = x -> conditional_obs_nll(exp.(x[1:n_theta]), exp.(x[n_theta+1:end]),
                                     population, model, eta_samples)
+
+    function g!(G, x)
+        grad = ForwardDiff.gradient(obj, x)
+        for i in eachindex(G); G[i] = isfinite(grad[i]) ? grad[i] : 0.0; end
+    end
+    function fg!(G, x)
+        grad = ForwardDiff.gradient(obj, x)
+        for i in eachindex(G); G[i] = isfinite(grad[i]) ? grad[i] : 0.0; end
+        return obj(x)
+    end
+
     result = try
-        od = OnceDifferentiable(obj, x0; autodiff = :forward)
+        od = OnceDifferentiable(obj, g!, fg!, x0)
         with_logger(NullLogger()) do
             Optim.optimize(od, lower, upper, x0,
                 Fminbox(BFGS(linesearch = Optim.LineSearches.BackTracking())),
                 Optim.Options(iterations = maxiter, g_tol = 1e-4, show_trace = false))
         end
-    catch
+    catch e
+        @warn "SAEM θ/σ M-step failed: $e"
         return theta, sigma_vals
     end
 
