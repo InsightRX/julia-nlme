@@ -13,6 +13,7 @@ module JuliaNLME
 using LinearAlgebra
 using Random
 using Printf
+using Statistics: mean
 using CSV, DataFrames
 using ForwardDiff
 using Optim
@@ -56,6 +57,7 @@ include("stats/likelihood.jl")
 include("estimation/parameterization.jl")
 include("estimation/inner_optimizer.jl")
 include("estimation/outer_optimizer.jl")
+include("estimation/saem.jl")
 
 # IO
 include("io/datareader.jl")
@@ -71,7 +73,7 @@ include("api.jl")
 # Exports
 # ---------------------------------------------------------------------------
 
-export fit, simulate
+export fit, fit_saem, simulate
 export read_data
 export parse_model_file, parse_model_string
 export print_results, parameter_table, sdtab

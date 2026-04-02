@@ -450,4 +450,59 @@ end
     @test 0.0 < result.theta[3] < 2.0    # THETA_CRCL
 end
 
+# ---------------------------------------------------------------------------
+# SAEM smoke test
+# ---------------------------------------------------------------------------
+
+@testset "SAEM: smoke test on simulated 1-CMT data" begin
+    using DataFrames, Random
+
+    model_str = """
+    model SAEMTest
+      [parameters]
+        theta TVCL(2.0, 0.1, 20.0)
+        theta TVV(20.0, 1.0, 200.0)
+        omega ETA_CL ~ 0.09
+        sigma PROP_ERR ~ 0.01
+      [individual_parameters]
+        CL = TVCL * exp(ETA_CL)
+        V  = TVV
+      [structural_model]
+        pk one_cpt_iv_bolus(cl=CL, v=V)
+      [error_model]
+        DV ~ proportional(PROP_ERR)
+    end
+    """
+    model = parse_model_string(model_str)
+
+    # Simulate 10 subjects
+    Random.seed!(99)
+    rows = []
+    for id in 1:10
+        push!(rows, (ID=id, TIME=0.0, AMT=100.0, DV=missing, EVID=1, MDV=1))
+        for t in [1.0, 4.0, 8.0, 24.0]
+            cl = 3.0 * exp(0.3 * randn())
+            v  = 20.0
+            dv = (100.0/v) * exp(-(cl/v)*t) * (1 + 0.1*randn())
+            push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.001), EVID=0, MDV=0))
+        end
+    end
+    pop = read_data(DataFrame(rows))
+
+    result = fit_saem(model, pop;
+                       n_iter_exploration = 30,
+                       n_iter_convergence = 30,
+                       n_mh_steps         = 2,
+                       run_covariance_step = false,
+                       verbose             = false,
+                       rng                 = MersenneTwister(42))
+
+    @test isfinite(result.ofv)
+    @test all(isfinite, result.theta)
+    @test result.theta[1] > 0      # TVCL > 0
+    @test result.theta[2] > 0      # TVV > 0
+    @test all(>=(0), diag(result.omega))   # Ω diagonal ≥ 0
+    @test result.n_iterations == 60
+end
+
 println("\nAll tests passed!")
