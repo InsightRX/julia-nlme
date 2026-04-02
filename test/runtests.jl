@@ -541,8 +541,8 @@ end
     pop = read_data(DataFrame(rows))
 
     result = fit(model, pop;
-                 interaction        = true,
-                 run_covariance_step = false,
+                 interaction         = true,
+                 run_covariance_step = true,
                  verbose             = false)
 
     is = importance_sampling(result, pop;
@@ -553,14 +553,25 @@ end
     @test isfinite(is.ofv)
     @test isfinite(is.aic)
     @test isfinite(is.bic)
-    @test length(is.per_subject_loglik) == 8
-    @test all(isfinite, is.per_subject_loglik)
-    @test all(>(0), is.ess)
-    @test all(<=(100), is.ess)
     @test is.n_samples == 100
     @test is.n_subjects == 8
-    # delta_ofv is stored correctly (foce_ofv − is.ofv)
     @test is.delta_ofv ≈ is.foce_ofv - is.ofv
+    @test is.ess > 0
+    @test is.ess_pct > 0
+
+    # IS-based SE: one per parameter, positive
+    @test length(is.se_theta) == 2   # TVCL, TVV
+    @test all(>(0), is.se_theta)
+    @test length(is.se_omega) == 1   # ETA_CL diagonal
+    @test all(>(0), is.se_omega)
+    @test length(is.se_sigma) == 1
+    @test all(>(0), is.se_sigma)
+
+    # Non-parametric CI: lower < upper, contains point estimate
+    for (est, (lo, hi)) in zip(is.theta, is.ci_theta)
+        @test lo < hi
+        @test lo < est < hi
+    end
 end
 
 println("\nAll tests passed!")
