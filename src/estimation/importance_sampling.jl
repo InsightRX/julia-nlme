@@ -64,6 +64,10 @@ struct ISResult
     se_omega::Vector{Float64}          # diagonal variance elements only
     se_sigma::Vector{Float64}
 
+    median_theta::Vector{Float64}
+    median_omega::Vector{Float64}      # diagonal variance elements only
+    median_sigma::Vector{Float64}
+
     ci_theta::Vector{NTuple{2, Float64}}   # (2.5th, 97.5th percentile)
     ci_omega::Vector{NTuple{2, Float64}}   # diagonal variance elements only
     ci_sigma::Vector{NTuple{2, Float64}}
@@ -82,31 +86,31 @@ function Base.show(io::IO, r::ISResult)
     @printf io "  OFV (FOCE): %10.3f    ΔOFV: %+.3f%s\n" r.foce_ofv r.delta_ofv delta_str
     @printf io "  Subjects: %d    Observations: %d    Samples: %d    ESS: %.1f%%\n" r.n_subjects r.n_obs r.n_samples r.ess_pct
 
-    sep = "-"^82
+    sep = "-"^96
 
-    function _print_rows(names, estimates, ses, cis)
+    function _print_rows(names, estimates, medians, ses, cis)
         println(io, "  " * sep)
-        @printf io "  %-18s  %12s  %10s  %8s  %24s\n" "Name" "Estimate" "SE" "%RSE" "95% CI"
+        @printf io "  %-18s  %12s  %12s  %10s  %8s  %24s\n" "Name" "Estimate" "Median" "SE" "%RSE" "95% CI"
         println(io, "  " * sep)
-        for (name, est, se, (ci_lo, ci_hi)) in zip(names, estimates, ses, cis)
+        for (name, est, med, se, (ci_lo, ci_hi)) in zip(names, estimates, medians, ses, cis)
             rse    = est != 0 ? abs(se / est) * 100 : NaN
             ci_str = @sprintf "[%9.4g, %9.4g]" ci_lo ci_hi
-            @printf io "  %-18s  %12.4g  %10.4g  %7.1f%%  %s\n" name est se rse ci_str
+            @printf io "  %-18s  %12.4g  %12.4g  %10.4g  %7.1f%%  %s\n" name est med se rse ci_str
         end
     end
 
     println(io, "\n  THETA:")
-    _print_rows(string.(r.theta_names), r.theta, r.se_theta, r.ci_theta)
+    _print_rows(string.(r.theta_names), r.theta, r.median_theta, r.se_theta, r.ci_theta)
 
     n_eta = size(r.omega, 1)
     println(io, "\n  OMEGA (diagonal variance):")
     _print_rows(["OMEGA($i,$i)" for i in 1:n_eta],
                 [r.omega[i,i]   for i in 1:n_eta],
-                r.se_omega, r.ci_omega)
+                r.median_omega, r.se_omega, r.ci_omega)
 
     println(io, "\n  SIGMA:")
     _print_rows(["SIGMA($i)" for i in 1:length(r.sigma)],
-                r.sigma, r.se_sigma, r.ci_sigma)
+                r.sigma, r.median_sigma, r.se_sigma, r.ci_sigma)
     println(io, "  " * sep)
 end
 
@@ -121,14 +125,20 @@ function _weighted_se(samples::AbstractVector{Float64},
     sqrt(max(0.0, sum(weights .* (samples .- μ).^2)))
 end
 
+"""Weighted quantile at probability p (0 < p < 1)."""
+function _weighted_quantile(samples::AbstractVector{Float64},
+                             weights::AbstractVector{Float64},
+                             p::Float64)
+    ord  = sortperm(samples)
+    cumw = cumsum(weights[ord])
+    samples[ord][something(findfirst(>=(p), cumw), lastindex(cumw))]
+end
+
 """Non-parametric CI: 2.5th and 97.5th percentile of the weighted distribution."""
 function _weighted_ci(samples::AbstractVector{Float64},
                        weights::AbstractVector{Float64})
-    ord    = sortperm(samples)
-    cumw   = cumsum(weights[ord])
-    s_sort = samples[ord]
-    lo = s_sort[something(findfirst(>=(0.025), cumw), lastindex(cumw))]
-    hi = s_sort[something(findfirst(>=(0.975), cumw), lastindex(cumw))]
+    lo = _weighted_quantile(samples, weights, 0.025)
+    hi = _weighted_quantile(samples, weights, 0.975)
     return (lo, hi)
 end
 
@@ -273,6 +283,10 @@ function importance_sampling(result::FitResult,
     se_omega = [_weighted_se(omega_d_mat[i, :], w) for i in 1:n_eta]
     se_sigma = [_weighted_se(sigma_mat[i, :],   w) for i in 1:n_sigma]
 
+    median_theta = [_weighted_quantile(theta_mat[i, :],   w, 0.5) for i in 1:n_theta]
+    median_omega = [_weighted_quantile(omega_d_mat[i, :], w, 0.5) for i in 1:n_eta]
+    median_sigma = [_weighted_quantile(sigma_mat[i, :],   w, 0.5) for i in 1:n_sigma]
+
     ci_theta = [_weighted_ci(theta_mat[i, :],   w) for i in 1:n_theta]
     ci_omega = [_weighted_ci(omega_d_mat[i, :], w) for i in 1:n_eta]
     ci_sigma = [_weighted_ci(sigma_mat[i, :],   w) for i in 1:n_sigma]
@@ -286,6 +300,7 @@ function importance_sampling(result::FitResult,
                     result.theta, result.theta_names,
                     result.omega, result.sigma,
                     se_theta, se_omega, se_sigma,
+                    median_theta, median_omega, median_sigma,
                     ci_theta, ci_omega, ci_sigma,
                     n_obs, N, n_params)
 end
