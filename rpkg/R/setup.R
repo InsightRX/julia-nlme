@@ -53,9 +53,12 @@ jnlme_setup <- function(project = Sys.getenv("JULIA_PROJECT", unset = NA),
     })
   }
 
-  julia_setup(JULIA_HOME = julia_home,
-              sysimage_path = sysimage_path,
-              ...)
+  setup_args <- c(
+    list(JULIA_HOME = julia_home),
+    if (!is.null(sysimage_path)) list(sysimage_path = sysimage_path),
+    list(...)
+  )
+  do.call(julia_setup, setup_args)
 
   # Activate the Julia project if given
   if (!is.na(project) && nchar(project) > 0) {
