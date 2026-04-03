@@ -169,32 +169,25 @@ head(data, 15)
 ...
 ```
 
-Now simulate DV values using the true parameter values.
-`jnlme_simulate()` returns a data.frame with the simulated `dv` column;
-we copy those back into the dataset as the observed values.
+Now simulate DV values from the known true parameter values.
+`jnlme_simulate()` accepts a named list with `theta`, `omega` (diagonal BSV
+variances), and `sigma`. It returns a data.frame with the simulated `dv`
+column, which we copy back into the dataset as the observed values.
 
 ```{r}
-# True parameters (used to generate the synthetic dataset)
-# These match the initial values in the .jnlme file
-sim_data <- data  # template: correct structure, DV will be filled in
+set.seed(42)
 
-# Simulate from model defaults (initial values = true values here)
-sim_out <- jnlme_simulate(model, data, jnlme_fit(model, data, verbose = FALSE))
-# Alternatively, simulate from known true params via a one-step fit result.
-# For simplicity we use the model defaults as the "truth":
-sim_out <- jnlme_simulate(model, data,
-                           jnlme_fit(model, data, verbose = FALSE,
-                                     run_covariance_step = FALSE))
-```
+# True population parameters used to generate the synthetic dataset
+true_params <- list(
+  theta = c(TVCL = 0.134, TVV = 8.1, TVKA = 1.0),
+  omega = c(ETA_CL = 0.07, ETA_V = 0.02, ETA_KA = 0.40),  # diagonal BSV variances
+  sigma = c(PROP_ERR = 0.01)
+)
 
-In practice you would simulate directly from a parameter list. Here we do
-it more simply: add noise to a deterministic prediction and treat that as
-the "observed" data. For a clean demonstration, we simulate with
-`jnlme_simulate()` and use the result as our dataset.
+sim_out <- jnlme_simulate(model, data, true_params)
 
-```{r}
 # Fill DV in observation rows
-obs_idx <- data$EVID == 0
+obs_idx      <- data$EVID == 0
 data$DV[obs_idx] <- sim_out$dv
 
 cat(sprintf("Dataset: %d subjects, %d observations\n",

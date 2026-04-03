@@ -244,7 +244,14 @@ distribution and simulates observations. It takes the fitted model and result
 and returns a data.frame.
 
 ```r
-# Single simulation replicate
+# Simulate from known true parameter values (no fit needed)
+sim <- jnlme_simulate(model, data, list(
+  theta = c(TVCL = 0.134, TVV = 8.1, TVKA = 1.0),
+  omega = c(ETA_CL = 0.07, ETA_V = 0.02, ETA_KA = 0.40),
+  sigma = c(PROP_ERR = 0.01)
+))
+
+# Simulate from a fitted result
 sim <- jnlme_simulate(model, data, result)
 
 # 200 replicates for a visual predictive check (VPC)

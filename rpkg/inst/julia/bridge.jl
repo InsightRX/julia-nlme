@@ -207,3 +207,30 @@ function r_simulate(model_key::String, result_key::String, data_csv::String;
     CSV.write(out, sim_df)
     return out
 end
+
+# Simulate from explicit parameter values (no prior fit needed).
+# omega_diag: diagonal BSV variances (length n_eta); off-diagonals are set to zero.
+function r_simulate_params(model_key::String, data_csv::String,
+                            theta::Vector{Float64},
+                            omega_diag::Vector{Float64},
+                            sigma::Vector{Float64};
+                            n_sims::Int = 1)::String
+    model = _model_cache[model_key]
+    dp    = model.default_params
+
+    omega  = JuliaNLME.OmegaMatrix(Matrix(Diagonal(omega_diag)), dp.omega.eta_names;
+                                    diagonal = dp.omega.diagonal)
+    params = JuliaNLME.ModelParameters(
+        theta, dp.theta_names,
+        dp.theta_lower, dp.theta_upper,
+        omega,
+        JuliaNLME.SigmaMatrix(sigma, dp.sigma.names),
+        dp.packed_fixed
+    )
+
+    df     = CSV.read(data_csv, DataFrame)
+    sim_df = JuliaNLME.simulate(model, params, df; n_sims)
+    out    = tempname() * ".csv"
+    CSV.write(out, sim_df)
+    return out
+end
