@@ -11,5 +11,10 @@ License: MIT + file LICENSE
 Imports:
     JuliaCall (>= 0.17.0)
 Suggests:
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    ggplot2,
+    dplyr
+VignetteBuilder: knitr
 Encoding: UTF-8

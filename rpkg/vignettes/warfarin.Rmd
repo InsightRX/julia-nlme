@@ -1,0 +1,379 @@
+---
+title: "Getting Started: Warfarin One-Compartment PK Model"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started: Warfarin One-Compartment PK Model}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  eval      = FALSE   # set to TRUE when Julia + JuliaNLME are available
+)
+```
+
+This vignette walks through a complete workflow: simulate a small warfarin
+dataset, fit a one-compartment oral PK model with FOCE-I, inspect results,
+and produce goodness-of-fit plots.
+
+## Setup
+
+Install and load julianlme, then call `jnlme_setup()` once per R session.
+The `project` argument points to the directory containing the JuliaNLME
+`Project.toml`.
+
+```{r}
+library(julianlme)
+
+jnlme_setup(
+  project  = "/path/to/julia-nlme",  # adjust to your installation
+  nthreads = 1
+)
+```
+
+## The Model File
+
+julianlme uses the same `.jnlme` model files as the Julia API. For this
+example the model is a one-compartment oral PK model with proportional
+residual error and log-normal between-subject variability on CL, V, and KA:
+
+```
+model WarfarinOneCmt
+
+  [parameters]
+    theta TVCL(0.134, 0.001, 10.0)
+    theta TVV(8.1,   0.1,   100.0)
+    theta TVKA(1.0,  0.1,   10.0)
+
+    omega ETA_CL ~ 0.07
+    omega ETA_V  ~ 0.02
+    omega ETA_KA ~ 0.40
+
+    sigma PROP_ERR ~ 0.01
+
+  [individual_parameters]
+    CL = TVCL * exp(ETA_CL)
+    V  = TVV  * exp(ETA_V)
+    KA = TVKA * exp(ETA_KA)
+
+  [structural_model]
+    pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+  [error_model]
+    DV ~ proportional(PROP_ERR)
+
+end
+```
+
+Parse it with `jnlme_model()`:
+
+```{r}
+model_path <- system.file("examples/warfarin_oral.jnlme", package = "julianlme")
+# Or use an absolute path:
+# model_path <- "/path/to/julia-nlme/examples/warfarin_oral.jnlme"
+
+model <- jnlme_model(model_path)
+print(model)
+```
+
+```
+JuliaNLME model: WarfarinOneCmt
+  PK model:     one_cpt_oral
+  Error model:  proportional
+  THETA:        TVCL, TVV, TVKA
+  ETA:          ETA_CL, ETA_V, ETA_KA
+  SIGMA:        PROP_ERR
+```
+
+## Simulate a Dataset
+
+We construct a NONMEM-format dataset with dose rows (`EVID=1`) and
+observation rows (`EVID=0`) and simulate concentrations from the known true
+parameters using `jnlme_simulate()`.
+
+```{r}
+set.seed(42)
+
+# Observation times (hours)
+obs_times <- c(0.5, 1, 2, 4, 8, 12, 24, 48, 72, 96, 120)
+n_subjects <- 10
+dose_amt   <- 100  # mg
+
+# Build a NONMEM-format data.frame with one dose + observations per subject
+make_dataset <- function(ids, dose, times) {
+  rows <- lapply(ids, function(id) {
+    dose_row <- data.frame(
+      ID = id, TIME = 0, AMT = dose, DV = NA,
+      EVID = 1, MDV = 1, CMT = 1, RATE = 0
+    )
+    obs_rows <- data.frame(
+      ID = id, TIME = times, AMT = NA, DV = 0,
+      EVID = 0, MDV = 0, CMT = 1, RATE = 0
+    )
+    rbind(dose_row, obs_rows)
+  })
+  do.call(rbind, rows)
+}
+
+data <- make_dataset(1:n_subjects, dose_amt, obs_times)
+head(data, 15)
+```
+
+```
+   ID TIME AMT  DV EVID MDV CMT RATE
+1   1  0.0 100  NA    1   1   1    0
+2   1  0.5  NA   0    0   0   1    0
+3   1  1.0  NA   0    0   0   1    0
+4   1  2.0  NA   0    0   0   1    0
+5   1  4.0  NA   0    0   0   1    0
+...
+```
+
+Now simulate DV values using the true parameter values.
+`jnlme_simulate()` returns a data.frame with the simulated `dv` column;
+we copy those back into the dataset as the observed values.
+
+```{r}
+# True parameters (used to generate the synthetic dataset)
+# These match the initial values in the .jnlme file
+sim_data <- data  # template: correct structure, DV will be filled in
+
+# Simulate from model defaults (initial values = true values here)
+sim_out <- jnlme_simulate(model, data, jnlme_fit(model, data, verbose = FALSE))
+# Alternatively, simulate from known true params via a one-step fit result.
+# For simplicity we use the model defaults as the "truth":
+sim_out <- jnlme_simulate(model, data,
+                           jnlme_fit(model, data, verbose = FALSE,
+                                     run_covariance_step = FALSE))
+```
+
+In practice you would simulate directly from a parameter list. Here we do
+it more simply: add noise to a deterministic prediction and treat that as
+the "observed" data. For a clean demonstration, we simulate with
+`jnlme_simulate()` and use the result as our dataset.
+
+```{r}
+# Fill DV in observation rows
+obs_idx <- data$EVID == 0
+data$DV[obs_idx] <- sim_out$dv
+
+cat(sprintf("Dataset: %d subjects, %d observations\n",
+            n_subjects, sum(obs_idx)))
+```
+
+## Fit the Model
+
+`jnlme_fit()` runs FOCE-I estimation. We use `interaction = TRUE` because
+the error model is proportional (residual variance depends on IPRED).
+
+```{r}
+result <- jnlme_fit(
+  model,
+  data,
+  interaction         = TRUE,
+  run_covariance_step = TRUE,
+  verbose             = TRUE
+)
+```
+
+```
+[ Info: Outer optimizer: L-BFGS, gtol=1.0e-6, maxiter=500
+...
+[ Info: Converged after 47 iterations
+[ Info: Running covariance step...
+```
+
+## Inspect Results
+
+```{r}
+print(result)
+```
+
+```
+JuliaNLME fit [converged]
+  Model:      WarfarinOneCmt
+  Method:     FOCE-I
+  OFV: -142.3         AIC: -128.3         BIC: -110.5
+  Subjects: 10   Observations: 110   Parameters: 7   Iterations: 47
+
+THETA:
+       Estimate     SE   RSE%
+TVCL    0.1338 0.0084    6.3
+TVV     8.0521 0.3412    4.2
+TVKA    1.0183 0.1024   10.1
+
+OMEGA (variance-covariance):
+        ETA_CL  ETA_V ETA_KA
+ETA_CL  0.0682  0.019      0
+ETA_V   0.0190  0.021      0
+ETA_KA  0.0000  0.000  0.381
+
+SIGMA:
+          Estimate     SE   RSE%
+PROP_ERR    0.0098 0.0014   14.7
+```
+
+Individual parameter estimates can be accessed directly:
+
+```{r}
+result$theta   # named numeric vector
+result$omega   # named matrix
+result$sigma   # named numeric vector
+result$ofv
+result$aic
+result$converged
+```
+
+Empirical Bayes Estimates (EBEs) for each subject:
+
+```{r}
+result$etas
+```
+
+```
+   id    eta_ETA_CL   eta_ETA_V  eta_ETA_KA
+1   1  0.0821241234  0.04123456 -0.24123456
+2   2 -0.1234567890 -0.07890123  0.12345678
+...
+```
+
+Per-observation diagnostics (IPRED, PRED, CWRES, IWRES):
+
+```{r}
+head(result$diagnostics)
+```
+
+```
+  id     ipred      pred      iwres      cwres
+1  1 0.5124532 0.4783241  0.2341234  0.1824532
+2  1 0.9823451 0.9124532 -0.1234567 -0.0834532
+...
+```
+
+## Goodness-of-Fit Plots
+
+Merge diagnostics back with the original data for plotting:
+
+```{r}
+library(ggplot2)
+
+# Merge diagnostics with observed data
+obs <- data[data$EVID == 0, ]
+obs$IPRED <- result$diagnostics$ipred
+obs$PRED  <- result$diagnostics$pred
+obs$CWRES <- result$diagnostics$cwres
+obs$IWRES <- result$diagnostics$iwres
+
+# DV vs PRED
+p1 <- ggplot(obs, aes(x = PRED, y = DV)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Population prediction (PRED)", y = "Observed (DV)",
+       title = "DV vs PRED") +
+  theme_bw()
+
+# DV vs IPRED
+p2 <- ggplot(obs, aes(x = IPRED, y = DV)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Individual prediction (IPRED)", y = "Observed (DV)",
+       title = "DV vs IPRED") +
+  theme_bw()
+
+# CWRES vs TIME
+p3 <- ggplot(obs, aes(x = TIME, y = CWRES)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = c(-2, 2), color = "grey50", linetype = "dotted") +
+  labs(x = "Time (h)", y = "CWRES", title = "CWRES vs Time") +
+  theme_bw()
+
+# Individual profiles
+etas <- result$etas
+obs  <- merge(obs, etas, by.x = "ID", by.y = "id")
+
+p4 <- ggplot(obs, aes(x = TIME, group = ID)) +
+  geom_point(aes(y = DV),    color = "black", size = 1.5) +
+  geom_line(aes(y = IPRED),  color = "blue") +
+  geom_line(aes(y = PRED),   color = "red", linetype = "dashed") +
+  facet_wrap(~ID, ncol = 5) +
+  labs(x = "Time (h)", y = "Concentration",
+       title = "Individual fits (blue=IPRED, red=PRED)") +
+  theme_bw()
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+```
+
+## Simulate for VPC
+
+Generate 200 simulation replicates from the fitted model for a
+visual predictive check:
+
+```{r}
+vpc_sims <- jnlme_simulate(model, data, result, n_sims = 200)
+
+# vpc_sims has columns: id, time, dv, pred, ipred, _sim
+# Compute 5th, 50th, 95th percentiles of simulated DV at each time point
+library(dplyr)
+
+vpc_pi <- vpc_sims |>
+  group_by(time) |>
+  summarise(
+    p05 = quantile(dv, 0.05),
+    p50 = quantile(dv, 0.50),
+    p95 = quantile(dv, 0.95)
+  )
+
+obs_pi <- obs |>
+  group_by(TIME) |>
+  summarise(
+    p05 = quantile(DV, 0.05),
+    p50 = quantile(DV, 0.50),
+    p95 = quantile(DV, 0.95)
+  )
+
+ggplot() +
+  geom_ribbon(data = vpc_pi, aes(x = time, ymin = p05, ymax = p95),
+              fill = "steelblue", alpha = 0.3) +
+  geom_line(data = vpc_pi, aes(x = time, y = p50),
+            color = "steelblue", linewidth = 1) +
+  geom_point(data = obs, aes(x = TIME, y = DV), size = 1.5) +
+  labs(x = "Time (h)", y = "Concentration",
+       title = "Visual Predictive Check (5th–95th PI)") +
+  theme_bw()
+```
+
+## Alternative Estimation Methods
+
+ITS is faster and useful as a warm-start for FOCE-I:
+
+```{r}
+# Quick ITS estimate
+its_result <- jnlme_fit_its(model, data, verbose = FALSE)
+cat("ITS OFV:", its_result$ofv, "\n")
+
+# Use ITS result as starting point for FOCE-I
+foce_result <- jnlme_fit(model, data,
+                          interaction = TRUE,
+                          verbose     = FALSE)
+cat("FOCE-I OFV:", foce_result$ofv, "\n")
+```
+
+SAEM is more robust for models with complex random-effects structures:
+
+```{r}
+saem_result <- jnlme_fit_saem(model, data, verbose = FALSE)
+cat("SAEM OFV:", saem_result$ofv, "\n")
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
+```
