@@ -48,26 +48,26 @@ The one-time precompilation writes a compiled cache to `~/.julia/compiled/`
 and is never repeated unless JuliaNLME or its dependencies are updated.
 
 For regular use, build a **sysimage** — a precompiled snapshot of Julia +
-JuliaNLME that reduces total startup to ~1–2 s. Run this once:
+JuliaNLME that reduces total startup to ~1–2 s. Run this once with
+`jnlme_build_sysimage()`:
 
 ```{r}
-# Takes ~5–10 minutes, then never again
-JuliaCall::julia_eval('
-  import Pkg; Pkg.add("PackageCompiler")
-  using PackageCompiler
-  create_sysimage(
-    ["JuliaNLME", "DataFrames", "CSV"],
-    sysimage_path = "julianlme.so"
-  )
-')
+# Takes 5-15 minutes, then never again (unless JuliaNLME is updated)
+sysimage <- jnlme_build_sysimage(
+  path    = "julianlme.so",        # .dll on Windows
+  project = "/path/to/julia-nlme"
+)
 ```
 
-Then pass the sysimage path to `jnlme_setup()`:
+The function installs PackageCompiler.jl if needed, runs a warmup script that
+exercises the key estimation code paths, and bakes the resulting native code
+into the sysimage. Then pass the path to `jnlme_setup()` in all future
+sessions:
 
 ```{r}
 jnlme_setup(
   project       = "/path/to/julia-nlme",
-  sysimage_path = "julianlme.so"
+  sysimage_path = "julianlme.so"   # or the path returned by jnlme_build_sysimage()
 )
 ```
 
