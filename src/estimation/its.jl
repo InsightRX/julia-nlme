@@ -142,7 +142,8 @@ function run_its(population::Population,
                   theta_maxiter::Int   = 30,
                   inner_maxiter::Int   = 200,
                   inner_tol::Float64   = 1e-8,
-                  verbose::Bool        = true)
+                  verbose::Bool        = true,
+                  nthreads::Int        = 1)
 
     N     = length(population)
     n_eta = model.n_eta
@@ -164,17 +165,27 @@ function run_its(population::Population,
         # ---- E-step: MAP estimation + Jacobians ----
         eta_hats, H_mats, any_failed = run_inner_loop(population, params_k, model;
                                                         maxiter = inner_maxiter,
-                                                        tol     = inner_tol)
+                                                        tol     = inner_tol,
+                                                        nthreads)
         any_failed && verbose &&
             @warn @sprintf("ITS iter %d: some inner EBE optimizations failed", k)
 
         # ---- E-step: Ĉᵢ computation ----
         C_hats = Vector{Matrix{Float64}}(undef, N)
-        Threads.@threads for i in 1:N
-            ipred_i  = Float64.(compute_predictions(model, population.subjects[i],
-                                                     theta_cur, eta_hats[i]))
-            R_diag_i = compute_R_diag(model.error_model, ipred_i, sigma_cur)
-            C_hats[i] = compute_C_hat(H_mats[i], R_diag_i, params_k.omega.chol)
+        if nthreads > 1
+            Threads.@threads for i in 1:N
+                ipred_i  = Float64.(compute_predictions(model, population.subjects[i],
+                                                         theta_cur, eta_hats[i]))
+                R_diag_i = compute_R_diag(model.error_model, ipred_i, sigma_cur)
+                C_hats[i] = compute_C_hat(H_mats[i], R_diag_i, params_k.omega.chol)
+            end
+        else
+            for i in 1:N
+                ipred_i  = Float64.(compute_predictions(model, population.subjects[i],
+                                                         theta_cur, eta_hats[i]))
+                R_diag_i = compute_R_diag(model.error_model, ipred_i, sigma_cur)
+                C_hats[i] = compute_C_hat(H_mats[i], R_diag_i, params_k.omega.chol)
+            end
         end
 
         # ---- M-step: closed-form Ω ----
@@ -239,6 +250,9 @@ ITS-specific kwargs:
   `verbose`             Print progress,                       default true
   `inner_maxiter`       Max inner (EBE) iterations,           default 200
   `inner_tol`           EBE convergence tolerance,            default 1e-8
+  `nthreads`            Threads for per-subject parallelism (default: all available).
+                        Start Julia with `julia -t N`; pass `nthreads=1` to disable.
+                        See `fit` docstring for scaling guidance.
 """
 function fit_its(model::CompiledModel,
                   population::Population,
@@ -251,7 +265,8 @@ function fit_its(model::CompiledModel,
                   interaction::Bool        = false,
                   verbose::Bool            = true,
                   inner_maxiter::Int       = 200,
-                  inner_tol::Float64       = 1e-8)
+                  inner_tol::Float64       = 1e-8,
+                  nthreads::Int            = Threads.nthreads())
 
     warnings = String[]
     for subject in population.subjects
@@ -266,23 +281,24 @@ function fit_its(model::CompiledModel,
     t_start = time()
     final_params, diagnostics = run_its(population, model, init_params;
         n_iter, conv_window, rel_tol, theta_maxiter,
-        inner_maxiter, inner_tol, verbose)
+        inner_maxiter, inner_tol, verbose, nthreads)
     t_elapsed = time() - t_start
     verbose && @info @sprintf("ITS completed in %.1f s", t_elapsed)
 
     # ---- Final EBEs and FOCE OFV ----
     verbose && @info "Computing final EBEs and FOCE OFV..."
     eta_hats, H_mats, _ = run_inner_loop(population, final_params, model;
-                                          maxiter = inner_maxiter, tol = inner_tol)
+                                          maxiter = inner_maxiter, tol = inner_tol,
+                                          nthreads)
     ofv_nll = foce_population_nll(final_params, population, model,
-                                   eta_hats, H_mats; interaction)
+                                   eta_hats, H_mats; interaction, nthreads)
     ofv = 2 * ofv_nll
 
     # ---- Covariance step ----
     covar, se_all, cov_success = if run_covariance_step
         verbose && @info "Running covariance step..."
         compute_covariance(pack_params(final_params), population, model,
-                           final_params, eta_hats, H_mats; interaction)
+                           final_params, eta_hats, H_mats; interaction, nthreads)
     else
         n_full = n_packed(final_params)
         zeros(n_full, n_full), Float64[], true
@@ -295,7 +311,7 @@ function fit_its(model::CompiledModel,
 
     # ---- Per-subject results ----
     sub_results = _compute_subject_results(population, model, final_params,
-                                            eta_hats, H_mats; interaction)
+                                            eta_hats, H_mats; interaction, nthreads)
 
     n_obs    = sum(s -> length(s.observations), population.subjects)
     n_params = n_packed(final_params)

@@ -221,13 +221,24 @@ function foce_population_nll(params::ModelParameters,
                                model::CompiledModel,
                                eta_hats::Vector{Vector{Float64}},
                                H_mats::Vector{Matrix{Float64}};
-                               interaction::Bool = false)::Float64
-    total = 0.0
-    for (i, subject) in enumerate(population.subjects)
-        total += foce_subject_nll(eta_hats[i], H_mats[i], subject, params, model;
-                                   interaction)
+                               interaction::Bool = false,
+                               nthreads::Int = 1)::Float64
+    n = length(population.subjects)
+    if nthreads > 1
+        buf = Vector{Float64}(undef, n)
+        Threads.@threads for i in 1:n
+            buf[i] = foce_subject_nll(eta_hats[i], H_mats[i], population.subjects[i],
+                                       params, model; interaction)
+        end
+        return sum(buf)
+    else
+        total = 0.0
+        for i in 1:n
+            total += foce_subject_nll(eta_hats[i], H_mats[i], population.subjects[i],
+                                       params, model; interaction)
+        end
+        return total
     end
-    return total
 end
 
 # ---------------------------------------------------------------------------
@@ -312,12 +323,22 @@ function foce_population_nll_diff(theta::AbstractVector{T},
                                     model::CompiledModel,
                                     eta_hats::Vector{Vector{Float64}},
                                     H_mats::Vector{Matrix{Float64}};
-                                    interaction::Bool = false) where T<:Real
-    total = zero(T)
-    for (i, subject) in enumerate(population.subjects)
-        total += foce_subject_nll_raw(eta_hats[i], H_mats[i], subject,
-                                       theta, omega_mat, sigma_vals, model;
-                                       interaction)
+                                    interaction::Bool = false,
+                                    nthreads::Int = 1) where T<:Real
+    n = length(population.subjects)
+    if nthreads > 1
+        buf = Vector{T}(undef, n)
+        Threads.@threads for i in 1:n
+            buf[i] = foce_subject_nll_raw(eta_hats[i], H_mats[i], population.subjects[i],
+                                           theta, omega_mat, sigma_vals, model; interaction)
+        end
+        return sum(buf)
+    else
+        total = zero(T)
+        for i in 1:n
+            total += foce_subject_nll_raw(eta_hats[i], H_mats[i], population.subjects[i],
+                                           theta, omega_mat, sigma_vals, model; interaction)
+        end
+        return total
     end
-    return total
 end

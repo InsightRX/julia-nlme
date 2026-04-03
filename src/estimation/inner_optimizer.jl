@@ -109,28 +109,37 @@ end
 
 Find EBEs for all subjects. Returns `(eta_hats, H_mats, any_failed)`.
 
-Subjects are processed in parallel using `Threads.@threads`.
+When `nthreads > 1`, subjects are processed in parallel using `Threads.@threads`.
 """
 function run_inner_loop(population::Population,
                          params::ModelParameters,
                          model::CompiledModel;
                          maxiter::Int = 200,
-                         tol::Float64 = 1e-6)
+                         tol::Float64 = 1e-6,
+                         nthreads::Int = 1)
 
     n = length(population)
     eta_hats  = Vector{Vector{Float64}}(undef, n)
     H_mats    = Vector{Matrix{Float64}}(undef, n)
     converged = Vector{Bool}(undef, n)
 
-    Threads.@threads for i in 1:n
-        try
-            eta_hats[i], H_mats[i], converged[i] =
-                find_ebe(population[i], params, model; maxiter, tol)
-        catch
-            n_obs = length(population[i].observations)
-            eta_hats[i]  = zeros(model.n_eta)
-            H_mats[i]    = zeros(n_obs, model.n_eta)
-            converged[i] = false
+    _ebe_body(i) = try
+        eta_hats[i], H_mats[i], converged[i] =
+            find_ebe(population[i], params, model; maxiter, tol)
+    catch
+        n_obs = length(population[i].observations)
+        eta_hats[i]  = zeros(model.n_eta)
+        H_mats[i]    = zeros(n_obs, model.n_eta)
+        converged[i] = false
+    end
+
+    if nthreads > 1
+        Threads.@threads for i in 1:n
+            _ebe_body(i)
+        end
+    else
+        for i in 1:n
+            _ebe_body(i)
         end
     end
 

@@ -1,7 +1,7 @@
 """
 JuliaNLME — Non-Linear Mixed Effects modeling for pharmacokinetics.
 
-Provides FOCE estimation for analytical PK models (1- and 2-compartment).
+Provides FOCE estimation for analytical PK models (1-, 2-, and 3-compartment).
 
 Quick start:
   using JuliaNLME
@@ -32,6 +32,7 @@ include("types.jl")
 # PK analytical equations and ODE solver
 include("pk/one_compartment.jl")
 include("pk/two_compartment.jl")
+include("pk/three_compartment.jl")
 include("pk/ode_solver.jl")
 
 """
@@ -46,10 +47,13 @@ function make_single_dose_fn(pk_model::Symbol, pk_params::NamedTuple)
         return _one_cpt_single_dose_fn(pk_model, pk_params)
     elseif pk_model in (:two_cpt_iv_bolus, :two_cpt_infusion, :two_cpt_oral)
         return _two_cpt_single_dose_fn(pk_model, pk_params)
+    elseif pk_model in (:three_cpt_iv_bolus, :three_cpt_infusion, :three_cpt_oral)
+        return _three_cpt_single_dose_fn(pk_model, pk_params)
     else
         error("Unknown PK model: $pk_model. " *
               "Supported: :one_cpt_iv_bolus, :one_cpt_infusion, :one_cpt_oral, " *
-              ":two_cpt_iv_bolus, :two_cpt_infusion, :two_cpt_oral")
+              ":two_cpt_iv_bolus, :two_cpt_infusion, :two_cpt_oral, " *
+              ":three_cpt_iv_bolus, :three_cpt_infusion, :three_cpt_oral")
     end
 end
 
@@ -98,6 +102,7 @@ export CompiledModel, FitResult, SubjectResult, ISResult, ODESpec
 # PK equations (for direct use / testing)
 export one_cpt_iv_bolus, one_cpt_infusion, one_cpt_oral
 export two_cpt_iv_bolus, two_cpt_infusion, two_cpt_oral
+export three_cpt_iv_bolus, three_cpt_infusion, three_cpt_oral
 export predict_subject
 
 end # module

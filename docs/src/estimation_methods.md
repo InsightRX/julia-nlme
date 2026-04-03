@@ -299,6 +299,58 @@ is_result.delta_ofv      # OFV_FOCE - OFV_IS
 - Always ensure `run_covariance_step=true` when calling `fit()` or `fit_saem()`, as IS requires the parameter covariance matrix
 - Compare IS SEs with FOCE SEs: if they agree, the quadratic approximation is adequate; if they disagree, report the IS estimates
 
+## Multi-Threading
+
+All three estimation methods (`fit`, `fit_saem`, `fit_its`) parallelize per-subject computations across threads. The bottleneck in every method is independent per-subject work: EBE inner-loop optimization, FOCE likelihood summation, MH sampling, or ITS Ĉᵢ computation. These have no inter-subject dependencies and scale well with thread count.
+
+### Enabling Threading
+
+Start Julia with multiple threads and pass `nthreads`:
+
+```julia
+# In terminal:  julia -t 4 --project=.
+
+result = fit(model, pop, init_params; nthreads=4)
+result = fit_its(model, pop; nthreads=4)
+result = fit_saem(model, pop; nthreads=4)
+```
+
+The default is `nthreads = Threads.nthreads()` — all threads available to Julia. Pass `nthreads=1` to run sequentially (useful for debugging or reproducibility).
+
+### Guidance by Dataset Size
+
+| Dataset size | Analytical models (1/2/3-cpt) | ODE models |
+|---|---|---|
+| N < 20 | Modest gain (~1.3–1.8x with 4 threads). Thread overhead is non-trivial relative to per-subject work. | Strong gain (often >2x). ODE integration per subject is expensive regardless of N. |
+| N = 20–50 | Good gain (~1.8–2.5x with 4 threads). | Near-linear scaling up to available threads. |
+| N > 50 | Strong gain (~2.5–3x with 4 threads). The parallel fraction dominates. | Near-linear scaling; limited mainly by the serial BFGS step. |
+
+!!! note "Amdahl's law"
+    Not all work is parallelized. The outer BFGS step, ForwardDiff gradient through the likelihood, and SAEM stochastic approximation update are all sequential. With N=30 analytical subjects the serial fraction is roughly 40%; with N=100 it drops to ~20%, giving better scaling.
+
+### Guidance by Model Complexity
+
+**Analytical 1/2/3-compartment models**: per-subject prediction is closed-form and very fast (microseconds). The inner EBE loop is still the bottleneck, but it converges in few iterations. Threading is worthwhile for N≥20, but the marginal gain per additional thread diminishes past 4.
+
+**ODE models**: each subject requires numerical ODE integration (Tsit5 solver) at every EBE iteration. Per-subject work is orders of magnitude larger than for analytical models, so threading is highly effective even with small N. For ODE models, always use all available threads.
+
+### Typical Performance (4 threads, analytical model)
+
+| N subjects | Speedup vs 1 thread |
+|---|---|
+| 10 | ~1.5x |
+| 30 | ~1.8x |
+| 100 | ~2.8x |
+
+ODE models typically achieve 3–4x speedup at the same N values.
+
+### Important Caveats
+
+- **Julia startup with threads**: threads must be set at Julia startup (`julia -t N`). `Threads.nthreads()` cannot be changed after startup.
+- **ForwardDiff thread safety**: ForwardDiff v0.10+ is thread-safe. Dual numbers are immutable value types and per-subject computations share no mutable state.
+- **BLAS threads**: if your model uses matrix operations inside the structural model, BLAS may use its own thread pool. You can control this with `using LinearAlgebra; BLAS.set_num_threads(1)` if you observe thread over-subscription.
+- **Reproducibility**: SAEM uses random sampling (MH steps). With `nthreads > 1`, subject processing order is non-deterministic, so results may differ slightly between runs. Use `nthreads=1` if exact reproducibility across runs is required.
+
 ## Comparing Methods
 
 | Feature | FOCE/FOCE-I | SAEM | ITS | Importance Sampling |

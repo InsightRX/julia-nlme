@@ -83,7 +83,8 @@ function make_outer_objective(population::Population,
                                 inner_maxiter::Int = 200,
                                 inner_tol::Float64 = 1e-6,
                                 interaction::Bool = false,
-                                verbose::Bool = true)
+                                verbose::Bool = true,
+                                nthreads::Int = 1)
 
     n = length(population)
 
@@ -98,7 +99,7 @@ function make_outer_objective(population::Population,
         params = unpack_params(x, template)
         eta_hats_cur, H_mats_cur, any_failed =
             run_inner_loop(population, params, model;
-                           maxiter=inner_maxiter, tol=inner_tol)
+                           maxiter=inner_maxiter, tol=inner_tol, nthreads)
         # Inner convergence failures during optimization are normal (line search
         # explores poor parameter regions). Only count; don't warn on each one.
         if any_failed
@@ -126,7 +127,7 @@ function make_outer_objective(population::Population,
         foce_population_nll_diff(theta, omega_mat, sigma_vals,
                                   population, model,
                                   state.eta_hats, state.H_mats;
-                                  interaction)
+                                  interaction, nthreads)
     end
 
     # Pre-allocate GradientConfig for the outer gradient.
@@ -149,7 +150,7 @@ function make_outer_objective(population::Population,
         _apply_outer_gradient!(G, x)
 
         ofv = foce_population_nll(params, population, model, eta_hats_cur, H_mats_cur;
-                                   interaction)
+                                   interaction, nthreads)
         state.last_ofv = ofv
         if isfinite(ofv) && ofv < state.best_ofv
             state.best_ofv = ofv
@@ -162,7 +163,7 @@ function make_outer_objective(population::Population,
     function f_only(x::AbstractVector{Float64})
         params, eta_hats_cur, H_mats_cur = _run_and_cache(x)
         ofv = foce_population_nll(params, population, model, eta_hats_cur, H_mats_cur;
-                                   interaction)
+                                   interaction, nthreads)
         state.last_ofv = ofv
         if isfinite(ofv) && ofv < state.best_ofv
             state.best_ofv = ofv
@@ -196,13 +197,14 @@ function compute_covariance(x_hat::Vector{Float64},
                               template::ModelParameters,
                               eta_hats::Vector{Vector{Float64}},
                               H_mats::Vector{Matrix{Float64}};
-                              interaction::Bool = false)
+                              interaction::Bool = false,
+                              nthreads::Int = 1)
     try
         ofv_fixed = x -> begin
             theta, omega_mat, sigma_vals = _unpack_raw(x, template)
             foce_population_nll_diff(theta, omega_mat, sigma_vals,
                                       population, model, eta_hats, H_mats;
-                                      interaction)
+                                      interaction, nthreads)
         end
         H_mat = ForwardDiff.hessian(ofv_fixed, x_hat)
         C  = inv(Symmetric(H_mat))
@@ -238,13 +240,14 @@ function optimize_population(population::Population,
                                optimizer::Symbol = :lbfgs,
                                lbfgs_memory::Int = 5,
                                global_search::Bool = false,
-                               global_maxeval::Int = 0)   # 0 → auto: 200 × n_params
+                               global_maxeval::Int = 0,   # 0 → auto: 200 × n_params
+                               nthreads::Int = 1)
 
     x0_full, lower_full, upper_full = initial_packed(init_params)
 
     f_only, g_only!, fdfg!, state = make_outer_objective(
         population, model, init_params;
-        inner_maxiter, inner_tol, interaction, verbose
+        inner_maxiter, inner_tol, interaction, verbose, nthreads
     )
 
     # -------------------------------------------------------------------------
@@ -402,7 +405,7 @@ function optimize_population(population::Population,
         verbose && @info "Running covariance step..."
         x_final = pack_params(final_params)
         compute_covariance(x_final, population, model, final_params,
-                           eta_final, H_final; interaction)
+                           eta_final, H_final; interaction, nthreads)
     else
         n_full = length(x0_fixed)
         zeros(n_full, n_full), Float64[], true   # empty SE = skipped (not failed)

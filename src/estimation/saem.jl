@@ -234,7 +234,8 @@ function run_saem(population::Population,
                    target_accept::Float64   = 0.4,
                    saem_theta_maxiter::Int  = 30,
                    verbose::Bool            = true,
-                   rng::Random.AbstractRNG  = Random.default_rng())
+                   rng::Random.AbstractRNG  = Random.default_rng(),
+                   nthreads::Int            = 1)
 
     N      = length(population)
     n_eta  = model.n_eta
@@ -278,14 +279,25 @@ function run_saem(population::Population,
                                     state.sigma_vals)
 
         # ---- Step 1: MH simulation ----
-        Threads.@threads for i in 1:N
-            tid = Threads.threadid()
-            n_acc, nll_new = mh_steps!(
-                state.eta_samples[i], state.nll_cache[i],
-                population.subjects[i], model, params_k,
-                state.step_scales[i], thread_rngs[tid], n_mh_steps)
-            state.accept_counts[i] += n_acc
-            state.nll_cache[i]      = nll_new
+        if nthreads > 1
+            Threads.@threads for i in 1:N
+                tid = Threads.threadid()
+                n_acc, nll_new = mh_steps!(
+                    state.eta_samples[i], state.nll_cache[i],
+                    population.subjects[i], model, params_k,
+                    state.step_scales[i], thread_rngs[tid], n_mh_steps)
+                state.accept_counts[i] += n_acc
+                state.nll_cache[i]      = nll_new
+            end
+        else
+            for i in 1:N
+                n_acc, nll_new = mh_steps!(
+                    state.eta_samples[i], state.nll_cache[i],
+                    population.subjects[i], model, params_k,
+                    state.step_scales[i], thread_rngs[1], n_mh_steps)
+                state.accept_counts[i] += n_acc
+                state.nll_cache[i]      = nll_new
+            end
         end
         state.steps_since_adapt += 1
 
@@ -314,10 +326,18 @@ function run_saem(population::Population,
         # Update NLL cache since params changed
         params_upd = _rebuild_params(init_params, state.theta, state.omega_mat,
                                       state.sigma_vals)
-        for i in 1:N
-            state.nll_cache[i] = individual_nll(state.eta_samples[i],
-                                                  population.subjects[i],
-                                                  params_upd, model)
+        if nthreads > 1
+            Threads.@threads for i in 1:N
+                state.nll_cache[i] = individual_nll(state.eta_samples[i],
+                                                      population.subjects[i],
+                                                      params_upd, model)
+            end
+        else
+            for i in 1:N
+                state.nll_cache[i] = individual_nll(state.eta_samples[i],
+                                                      population.subjects[i],
+                                                      params_upd, model)
+            end
         end
 
         # ---- Adapt MH step sizes ----
@@ -391,6 +411,10 @@ SAEM-specific kwargs (all others forwarded to covariance/EBE steps):
   `interaction`         FOCEI for final OFV,              default false
   `verbose`             Print progress,                   default true
   `rng`                 Random number generator
+  `nthreads`            Threads for per-subject parallelism (default: all available).
+                        Start Julia with `julia -t N`; pass `nthreads=1` to disable.
+                        Parallelizes both the MH sampling loop and the NLL cache update.
+                        See `fit` docstring for scaling guidance.
 """
 function fit_saem(model::CompiledModel,
                    population::Population,
@@ -405,7 +429,8 @@ function fit_saem(model::CompiledModel,
                    verbose::Bool             = true,
                    rng::Random.AbstractRNG   = Random.default_rng(),
                    inner_maxiter::Int        = 200,
-                   inner_tol::Float64        = 1e-8)
+                   inner_tol::Float64        = 1e-8,
+                   nthreads::Int             = Threads.nthreads())
 
     warnings = String[]
     for subject in population.subjects
@@ -421,23 +446,24 @@ function fit_saem(model::CompiledModel,
     final_params, saem_state = run_saem(population, model, init_params;
         n_iter_exploration, n_iter_convergence,
         n_mh_steps, adapt_interval, saem_theta_maxiter,
-        verbose, rng)
+        verbose, rng, nthreads)
     t_elapsed = time() - t_start
     verbose && @info @sprintf("SAEM completed in %.1f s", t_elapsed)
 
     # ---- Final EBEs and FOCE OFV (for AIC/BIC comparability with FOCE) ----
     verbose && @info "Computing final EBEs and FOCE OFV..."
     eta_hats, H_mats, _ = run_inner_loop(population, final_params, model;
-                                          maxiter = inner_maxiter, tol = inner_tol)
+                                          maxiter = inner_maxiter, tol = inner_tol,
+                                          nthreads)
     ofv_nll = foce_population_nll(final_params, population, model,
-                                   eta_hats, H_mats; interaction)
+                                   eta_hats, H_mats; interaction, nthreads)
     ofv = 2 * ofv_nll
 
     # ---- Covariance step ----
     covar, se_all, cov_success = if run_covariance_step
         verbose && @info "Running covariance step..."
         compute_covariance(pack_params(final_params), population, model,
-                           final_params, eta_hats, H_mats; interaction)
+                           final_params, eta_hats, H_mats; interaction, nthreads)
     else
         n_full = n_packed(final_params)
         zeros(n_full, n_full), Float64[], true
@@ -449,7 +475,7 @@ function fit_saem(model::CompiledModel,
 
     # ---- Per-subject results ----
     sub_results = _compute_subject_results(population, model, final_params,
-                                            eta_hats, H_mats; interaction)
+                                            eta_hats, H_mats; interaction, nthreads)
 
     n_obs    = sum(s -> length(s.observations), population.subjects)
     n_params = n_packed(final_params)
