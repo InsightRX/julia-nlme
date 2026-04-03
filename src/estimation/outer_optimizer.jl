@@ -117,21 +117,36 @@ function make_outer_objective(population::Population,
         @info @sprintf("Evaluation %d: OFV = %.3f", eval_idx, 2 * state.best_ofv)
     end
 
+    # Single stable closure for the AD-differentiable outer objective.
+    # Defined ONCE here so its type is fixed across all gradient calls — ForwardDiff
+    # can reuse its compiled specialisation. Reads current EBEs/H from `state`
+    # (updated by _run_and_cache before any gradient call).
+    _ofv_for_ad = x_ad -> begin
+        theta, omega_mat, sigma_vals = _unpack_raw(x_ad, template)
+        foce_population_nll_diff(theta, omega_mat, sigma_vals,
+                                  population, model,
+                                  state.eta_hats, state.H_mats;
+                                  interaction)
+    end
+
+    # Pre-allocate GradientConfig for the outer gradient.
+    # Reused across all fdfg!/g_only! calls — avoids re-allocating Dual buffers.
+    x0_for_cfg, _, _ = initial_packed(template)
+    outer_grad_cfg   = ForwardDiff.GradientConfig(_ofv_for_ad, x0_for_cfg)
+
+    function _apply_outer_gradient!(G, x)
+        grad = ForwardDiff.gradient(_ofv_for_ad, x, outer_grad_cfg)
+        for i in eachindex(G)
+            G[i] = isfinite(grad[i]) ? grad[i] : 0.0
+        end
+    end
+
     # Combined f+g: runs inner loop once, same EBEs for both value and gradient.
     # Signature: fg!(G, x) → scalar  (NLSolversBase fdf convention)
     function fdfg!(G::AbstractVector{Float64}, x::AbstractVector{Float64})
         params, eta_hats_cur, H_mats_cur = _run_and_cache(x)
 
-        ofv_diff = x_ad -> begin
-            theta, omega_mat, sigma_vals = _unpack_raw(x_ad, template)
-            foce_population_nll_diff(theta, omega_mat, sigma_vals,
-                                      population, model, eta_hats_cur, H_mats_cur;
-                                      interaction)
-        end
-        grad = ForwardDiff.gradient(ofv_diff, x)
-        for i in eachindex(G)
-            G[i] = isfinite(grad[i]) ? grad[i] : 0.0
-        end
+        _apply_outer_gradient!(G, x)
 
         ofv = foce_population_nll(params, population, model, eta_hats_cur, H_mats_cur;
                                    interaction)
@@ -157,17 +172,8 @@ function make_outer_objective(population::Population,
     end
 
     function g_only!(G::AbstractVector{Float64}, x::AbstractVector{Float64})
-        _, eta_hats_cur, H_mats_cur = _run_and_cache(x)
-        ofv_diff = x_ad -> begin
-            theta, omega_mat, sigma_vals = _unpack_raw(x_ad, template)
-            foce_population_nll_diff(theta, omega_mat, sigma_vals,
-                                      population, model, eta_hats_cur, H_mats_cur;
-                                      interaction)
-        end
-        grad = ForwardDiff.gradient(ofv_diff, x)
-        for i in eachindex(G)
-            G[i] = isfinite(grad[i]) ? grad[i] : 0.0
-        end
+        _run_and_cache(x)
+        _apply_outer_gradient!(G, x)
         nothing
     end
 

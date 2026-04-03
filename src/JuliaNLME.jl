@@ -16,19 +16,23 @@ using Printf
 using Statistics: mean
 using CSV, DataFrames
 using ForwardDiff
+using DiffResults
 using Optim
 using LogExpFunctions
 using RuntimeGeneratedFunctions
 using Tables
+using OrdinaryDiffEq
+using StaticArrays
 
 RuntimeGeneratedFunctions.init(@__MODULE__)
 
 # Core types (must be loaded first — everything else depends on these)
 include("types.jl")
 
-# PK analytical equations
+# PK analytical equations and ODE solver
 include("pk/one_compartment.jl")
 include("pk/two_compartment.jl")
+include("pk/ode_solver.jl")
 
 """
     make_single_dose_fn(pk_model, pk_params)
@@ -58,6 +62,7 @@ include("estimation/parameterization.jl")
 include("estimation/inner_optimizer.jl")
 include("estimation/outer_optimizer.jl")
 include("estimation/saem.jl")
+include("estimation/its.jl")
 include("estimation/importance_sampling.jl")
 
 # IO
@@ -74,7 +79,7 @@ include("api.jl")
 # Exports
 # ---------------------------------------------------------------------------
 
-export fit, fit_saem, importance_sampling, simulate
+export fit, fit_saem, fit_its, importance_sampling, simulate
 export read_data
 export parse_model_file, parse_model_string
 export print_results, parameter_table, sdtab
@@ -84,7 +89,7 @@ export pack_params, unpack_params
 # Types
 export Population, Subject, DoseEvent
 export ModelParameters, OmegaMatrix, SigmaMatrix, n_etas
-export CompiledModel, FitResult, SubjectResult, ISResult
+export CompiledModel, FitResult, SubjectResult, ISResult, ODESpec
 
 # PK equations (for direct use / testing)
 export one_cpt_iv_bolus, one_cpt_infusion, one_cpt_oral

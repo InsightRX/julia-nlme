@@ -15,6 +15,7 @@ julia --project=. -e 'import Pkg; Pkg.instantiate(); Pkg.add("Test")'
 julia --project=. examples/ex1_warfarin.jl
 julia --project=. examples/ex2_two_cpt_iv.jl
 julia --project=. examples/ex3_two_cpt_oral_cov.jl
+julia --project=. examples/ex4_ode_mm.jl          # ODE-based MM elimination
 
 # Start Julia REPL with package loaded
 julia --project=. -e 'using JuliaNLME'
@@ -27,15 +28,19 @@ JuliaNLME is a Non-Linear Mixed Effects (NLME) modeling library for pharmacokine
 ### Layer structure (load order matters)
 
 ```
-src/types.jl                     — Core structs (Subject, Population, ModelParameters, FitResult, etc.)
+src/types.jl                     — Core structs (Subject, Population, ModelParameters, FitResult, ODESpec, etc.)
 src/pk/one_compartment.jl        — 1-CMT analytical equations + _one_cpt_single_dose_fn
 src/pk/two_compartment.jl        — 2-CMT analytical equations + _two_cpt_single_dose_fn
+src/pk/ode_solver.jl             — _ode_predictions: segment-by-segment ODE integration with dose events
 src/JuliaNLME.jl                 — make_single_dose_fn dispatcher (after both PK files are loaded)
 src/stats/residual_error.jl      — residual_variance, compute_R_diag, iwres, cwres
 src/stats/likelihood.jl          — individual_nll (inner loop obj), foce_subject_nll, foce_population_nll
 src/estimation/parameterization.jl — pack_params/unpack_params (Cholesky/log transforms)
 src/estimation/inner_optimizer.jl  — find_ebe: per-subject η optimization via ForwardDiff + Optim
 src/estimation/outer_optimizer.jl  — optimize_population: BFGS over θ/Ω/σ + covariance step
+src/estimation/saem.jl             — SAEM estimation (stochastic EM, MH sampling)
+src/estimation/its.jl              — ITS estimation (deterministic two-stage, MAP + closed-form Ω)
+src/estimation/importance_sampling.jl — IS parameter uncertainty
 src/io/datareader.jl             — read_data: NONMEM-format CSV → Population
 src/io/output.jl                 — print_results, parameter_table, sdtab
 src/parser/model_parser.jl       — parse .jnlme model files → CompiledModel
@@ -66,6 +71,7 @@ After convergence: covariance step via `ForwardDiff.hessian` of OFV.
 
 ### Model file format (`.jnlme`)
 
+**Analytical model** (uses built-in PK equations):
 ```
 model Name
   [parameters]    — theta NAME(init, lower, upper) / omega ETA ~ var / sigma NAME ~ var
@@ -75,7 +81,26 @@ model Name
 end
 ```
 
-The `[individual_parameters]` block is parsed via `Meta.parse` and compiled via `RuntimeGeneratedFunctions.jl` to avoid world-age issues. The `pk()` argument names must match the supported PK model symbols.
+**ODE model** (arbitrary differential equations):
+```
+model Name
+  [parameters]    — same as above
+  [individual_parameters]  — defines PK params used in ODEs (ALL defined vars are passed to ODE as p.NAME)
+  [structural_model]       — ode(obs_cmt=STATE_NAME, states=[STATE1, STATE2, ...])
+  [odes]                   — d/dt(STATE) = expression  (one line per state)
+  [error_model]            — same as above
+end
+```
+
+The `[individual_parameters]` block is parsed via `Meta.parse` and compiled via `RuntimeGeneratedFunctions.jl` to avoid world-age issues. For ODE models, the `pk_param_fn` returns ALL defined variables (not just mapped ones), and these are accessible in the ODE as `p.NAME`.
+
+### ODE model design
+
+- **`ODESpec`** (in `types.jl`): holds the compiled ODE function, state name list, and `obs_cmt_idx`
+- **Dose handling**: `_ode_predictions` (in `ode_solver.jl`) integrates segment-by-segment, applying bolus doses as instantaneous state increments at each dose time. Only bolus doses (`rate==0`) are supported.
+- **ForwardDiff**: `u0 = zeros(T, n_states)` where T is inferred from `typeof(first(values(pk_params)))`. Since `Tsit5` is a pure explicit method, Dual-typed states propagate through automatically.
+- **Solver**: `Tsit5()` (explicit, 5th-order RK). Suitable for most non-stiff PK ODE systems.
+- **Observation extraction**: uses `saveat` to evaluate the ODE at each obs time. No callbacks needed.
 
 ### Supported PK models
 
@@ -113,4 +138,7 @@ The gradient uses `foce_population_nll_diff` with EBEs held fixed (standard FOCE
   - `interaction=true` (FOCEI, paper eq. 20 simplified via matrix determinant lemma): `0.5×[(y-IPRED)ᵀV⁻¹(y-IPRED) + η̂ᵀΩ⁻¹η̂ + log|R̃|]`. The three Ω terms in eq. 20 reduce to just `log|R̃|` plus `η̂ᵀΩ⁻¹η̂`; the `log|Ω|` and `log|V|` cancel. The `η̂ᵀΩ⁻¹η̂` term prevents Ω→0 (pushing it to +∞), while `log|R̃|` grows if Ω→∞.
 - **NONMEM OFV convention**: `OFV = 2×NLL` (no `n_obs×log(2π)` constant). NONMEM omits this constant from its reported OFV since it is a constant w.r.t. parameters and cancels in model comparisons. The `n_eta×log(2π)` terms from the η prior and Laplace correction cancel each other exactly.
 - **No EM post-processing**: the FOCEI objective is inherently well-conditioned for Ω. There is no separate EM M-step.
+- **ITS Ĉᵢ formula**: `compute_C_hat` computes `[HᵀV⁻¹H + Ω⁻¹]⁻¹` where V = diag(R_diag) and Ω⁻¹ = L⁻ᵀL⁻¹. This corrects for EBE shrinkage in the Ω M-step. Without it, the sample covariance of η̂ᵢ under-estimates Ω.
+- **ITS Ω M-step**: `Ω_new = (1/N) Σᵢ [(η̂ᵢ − μ̂)(η̂ᵢ − μ̂)ᵀ + Ĉᵢ]` (closed form). The θ/σ M-step reuses `saem_theta_sigma_mstep` (BFGS on conditional obs-NLL with η fixed).
+- **ITS convergence**: rolling window — compares mean of last `conv_window÷2` packed-param vectors against the previous `conv_window÷2`. Converged when max relative change < `rel_tol`.
 - **Plotting**: examples use TidierPlots.jl (`ggplot`, `geom_point`, `geom_line`, `geom_hline`, `ggsave`). `geom_abline` is not implemented in TidierPlots — draw identity lines with `geom_line` + a two-point DataFrame. Use `:dash` (Symbol) not `"dashed"` (String) for `linetype`.

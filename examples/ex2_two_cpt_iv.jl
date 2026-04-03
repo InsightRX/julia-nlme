@@ -71,10 +71,10 @@ init_params = ModelParameters(
 model = parse_model_file(joinpath(@__DIR__, "two_cpt_iv.jnlme"))
 
 result = fit(model, pop, init_params;
-             outer_maxiter=500,
-             run_covariance_step=true,
-             optimizer = :LD_SLSQP,
-             verbose=true)
+                    outer_maxiter=500,
+                    run_covariance_step=true,
+                    optimizer = :LD_SLSQP,
+                    verbose=true)
 
 print_results(result)
 

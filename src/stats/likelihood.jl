@@ -45,6 +45,15 @@ function compute_predictions(model::CompiledModel,
                                eta::AbstractVector{T2}) where {T1<:Real, T2<:Real}
     T = promote_type(T1, T2)
 
+    # ODE model path — bypass analytical PK dispatcher
+    if model.ode_spec !== nothing
+        isempty(subject.tvcov) ||
+            error("Time-varying covariates are not yet supported in ODE models")
+        cov_T     = Dict{Symbol, T}(k => T(v) for (k, v) in subject.covariates)
+        pk_params = model.pk_param_fn(T.(theta), T.(eta), cov_T)
+        return _ode_predictions(model.ode_spec, pk_params, subject)
+    end
+
     if isempty(subject.tvcov)
         # Time-constant covariates: original single-pass path
         cov_T = Dict{Symbol, T}(k => T(v) for (k, v) in subject.covariates)

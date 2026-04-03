@@ -8,7 +8,7 @@ using Newton's method with ForwardDiff-computed gradients and Hessian.
 Also computes the Jacobian H = ∂f/∂η|_{η̂} needed for FOCE linearization.
 """
 
-using ForwardDiff, Optim, LinearAlgebra, Logging
+using ForwardDiff, DiffResults, Optim, LinearAlgebra, Logging
 
 # ---------------------------------------------------------------------------
 # Find EBE for a single subject
@@ -35,13 +35,24 @@ function find_ebe(subject::Subject,
     n_eta = model.n_eta
     eta0  = zeros(n_eta)
 
-    # Objective and gradient via ForwardDiff
     obj = η -> individual_nll(η, subject, params, model)
 
-    grad! = (g, η) -> begin
-        g .= ForwardDiff.gradient(obj, η)
-        nothing
+    # Pre-allocate DiffResult and GradientConfig once per find_ebe call.
+    # Avoids reallocating Dual-number buffers on every BFGS gradient step.
+    diff_result = DiffResults.GradientResult(eta0)
+    cfg         = ForwardDiff.GradientConfig(obj, eta0)
+
+    # Combined f+g: one Dual forward pass extracts both value and gradient.
+    # OnceDifferentiable calls this at accepted BFGS steps, saving the extra
+    # Float64 function evaluation that separate f/g! calls would require.
+    function fg!(G, η)
+        ForwardDiff.gradient!(diff_result, obj, η, cfg)
+        G .= DiffResults.gradient(diff_result)
+        return DiffResults.value(diff_result)
     end
+
+    f_only(η) = individual_nll(η, subject, params, model)
+    g_only!(G, η) = (fg!(G, η); nothing)
 
     # Suppress Optim's "NaN in gradient" warnings: they are expected when the
     # line search explores extreme η values and the individual NLL is undefined
@@ -49,10 +60,18 @@ function find_ebe(subject::Subject,
     # because find_ebe itself emits no @info or @warn messages.
     # with_logger alone is not sufficient when called from Threads.@threads
     # tasks (which don't reliably inherit the parent task's logger state).
+    #
+    # NOTE: OnceDifferentiable construction is inside the try block.
+    # For ODE models, the fg! call inside the constructor triggers
+    # OrdinaryDiffEq JIT compilation for Dual types; when called from
+    # multiple Threads.@threads workers simultaneously this can fail.
+    # Keeping construction inside the try block ensures we fall back to
+    # Nelder-Mead (Float64-only, no Dual compilation needed) in that case.
     result = try
         with_logger(NullLogger()) do
+            od = OnceDifferentiable(f_only, g_only!, fg!, copy(eta0))
             Optim.optimize(
-                obj, grad!, eta0,
+                od, eta0,
                 BFGS(linesearch = Optim.LineSearches.BackTracking()),
                 Optim.Options(iterations = maxiter, g_tol = tol, show_trace = false)
             )
@@ -61,7 +80,7 @@ function find_ebe(subject::Subject,
         # Fall back to gradient-free Nelder-Mead if BFGS fails
         try
             with_logger(NullLogger()) do
-                Optim.optimize(obj, eta0, NelderMead(),
+                Optim.optimize(f_only, eta0, NelderMead(),
                                Optim.Options(iterations = maxiter*10, g_tol = tol, show_trace = false))
             end
         catch
@@ -72,11 +91,11 @@ function find_ebe(subject::Subject,
     eta_hat   = Optim.minimizer(result)
     converged = Optim.converged(result)
 
-    # Jacobian H = ∂f/∂η at η̂  (n_obs × n_eta)
-    H = ForwardDiff.jacobian(
-        η -> compute_predictions(model, subject, params.theta, η),
-        eta_hat
-    )
+    # Jacobian H = ∂f/∂η at η̂  (n_obs × n_eta).
+    # Pre-allocate JacobianConfig to avoid re-allocating Dual buffers.
+    pred_fn = η -> compute_predictions(model, subject, params.theta, η)
+    jac_cfg = ForwardDiff.JacobianConfig(pred_fn, eta_hat)
+    H = ForwardDiff.jacobian(pred_fn, eta_hat, jac_cfg)
 
     return eta_hat, H, converged
 end

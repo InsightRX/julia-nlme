@@ -1,0 +1,49 @@
+# 1-compartment oral PK model with Michaelis-Menten (saturable) elimination.
+#
+# This model cannot be expressed with an analytical solution — it requires ODEs.
+# Compare to warfarin_oral.jnlme which uses linear (first-order) elimination.
+#
+# States:
+#   depot   — absorption compartment (amount, mg)
+#   central — central compartment (concentration, mg/L)
+#
+# The observable (DV) is central directly, i.e. plasma concentration in mg/L.
+# Oral doses (EVID=1, CMT=1) are deposited into depot as amounts.
+#
+# At high concentrations (C >> KM) elimination approaches a fixed rate VMAX,
+# giving much slower apparent clearance than a linear model would predict.
+# This non-linearity is clearly visible in the concentration–time profile:
+# a convex terminal slope rather than the linear log-scale decline.
+
+model MMOral
+
+  [parameters]
+    theta TVVMAX(3.0,  0.1, 50.0)   # maximum elimination rate (mg/h)
+    theta TVKM(5.0,    0.1, 100.0)  # Michaelis-Menten constant (mg/L)
+    theta TVV(10.0,    1.0, 200.0)  # volume of distribution (L)
+    theta TVKA(1.2,    0.05, 20.0)  # first-order absorption rate (1/h)
+
+    omega ETA_VMAX ~ 0.25   # ~40% CV on VMAX
+    omega ETA_V    ~ 0.20   # ~32% CV on V
+
+    sigma PROP_ERR ~ 0.2   # 14% proportional residual error
+
+  [individual_parameters]
+    VMAX = TVVMAX * exp(ETA_VMAX)
+    KM   = TVKM
+    V    = TVV   * exp(ETA_V)
+    KA   = TVKA
+
+  [structural_model]
+    ode(obs_cmt=central, states=[depot, central])
+
+  [odes]
+    # depot is in amount (mg); central is in concentration (mg/L)
+    # Oral dose is absorbed from depot into central, scaled by V
+    d/dt(depot)   = -KA * depot
+    d/dt(central) = KA * depot / V - VMAX * central / (KM + central)
+
+  [error_model]
+    DV ~ proportional(PROP_ERR)
+
+end

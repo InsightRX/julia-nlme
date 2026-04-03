@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Model File Format · JuliaNLME.jl</title><script data-outdated-warner src="assets/warner.js"></script><link rel="canonical" href="https://insightrx.github.io/julia-nlme/model_file_format.html"/><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="index.html">JuliaNLME.jl</a></span></div><form class="docs-search" action="search.html"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="index.html">Home</a></li><li><a class="tocitem" href="getting_started.html">Getting Started</a></li><li><a class="tocitem" href="interfaces.html">Interfaces</a></li><li class="is-active"><a class="tocitem" href="model_file_format.html">Model File Format</a><ul class="internal"><li><a class="tocitem" href="#General-Structure"><span>General Structure</span></a></li><li><a class="tocitem" href="#[parameters]-Block"><span><code>[parameters]</code> Block</span></a></li><li><a class="tocitem" href="#[individual_parameters]-Block"><span><code>[individual_parameters]</code> Block</span></a></li><li><a class="tocitem" href="#[structural_model]-Block"><span><code>[structural_model]</code> Block</span></a></li><li><a class="tocitem" href="#[odes]-Block"><span><code>[odes]</code> Block</span></a></li><li><a class="tocitem" href="#[error_model]-Block"><span><code>[error_model]</code> Block</span></a></li><li><a class="tocitem" href="#Complete-Example"><span>Complete Example</span></a></li></ul></li><li><a class="tocitem" href="estimation_methods.html">Estimation Methods</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="examples/warfarin.html">1-Cpt Oral (Warfarin)</a></li><li><a class="tocitem" href="examples/two_cpt_iv.html">2-Cpt IV Bolus</a></li><li><a class="tocitem" href="examples/two_cpt_oral_cov.html">2-Cpt Oral + Covariates</a></li><li><a class="tocitem" href="examples/ode_mm.html">ODE: Michaelis-Menten</a></li></ul></li><li><a class="tocitem" href="api.html">API Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href="model_file_format.html">Model File Format</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href="model_file_format.html">Model File Format</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com//blob/master/docs/src/model_file_format.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Model-File-Format"><a class="docs-heading-anchor" href="#Model-File-Format">Model File Format</a><a id="Model-File-Format-1"></a><a class="docs-heading-anchor-permalink" href="#Model-File-Format" title="Permalink"></a></h1><p>JuliaNLME uses <code>.jnlme</code> model files — a declarative format for specifying population PK models. Models are parsed with <a href="api.html#JuliaNLME.parse_model_file"><code>parse_model_file</code></a> or <a href="api.html#JuliaNLME.parse_model_string"><code>parse_model_string</code></a>.</p><h2 id="General-Structure"><a class="docs-heading-anchor" href="#General-Structure">General Structure</a><a id="General-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#General-Structure" title="Permalink"></a></h2><pre><code class="nohighlight hljs">model ModelName
+
+  [parameters]
+    # Fixed effects, random effects, residual error
+
+  [individual_parameters]
+    # Equations mapping population params + ETAs to individual PK params
+
+  [structural_model]
+    # PK model specification (analytical or ODE)
+
+  [odes]
+    # (ODE models only) Differential equations
+
+  [error_model]
+    # Residual error model
+
+end</code></pre><h2 id="[parameters]-Block"><a class="docs-heading-anchor" href="#[parameters]-Block"><code>[parameters]</code> Block</a><a id="[parameters]-Block-1"></a><a class="docs-heading-anchor-permalink" href="#[parameters]-Block" title="Permalink"></a></h2><h3 id="Fixed-Effects-(theta)"><a class="docs-heading-anchor" href="#Fixed-Effects-(theta)">Fixed Effects (theta)</a><a id="Fixed-Effects-(theta)-1"></a><a class="docs-heading-anchor-permalink" href="#Fixed-Effects-(theta)" title="Permalink"></a></h3><pre><code class="nohighlight hljs">theta NAME(initial_value, lower_bound, upper_bound)</code></pre><p>Example:</p><pre><code class="nohighlight hljs">theta TVCL(5.0, 0.1, 100.0)
+theta TVV(50.0, 1.0, 500.0)</code></pre><h3 id="Random-Effects-(omega)"><a class="docs-heading-anchor" href="#Random-Effects-(omega)">Random Effects (omega)</a><a id="Random-Effects-(omega)-1"></a><a class="docs-heading-anchor-permalink" href="#Random-Effects-(omega)" title="Permalink"></a></h3><p>Each omega line defines one ETA with its initial variance:</p><pre><code class="nohighlight hljs">omega ETA_NAME ~ variance</code></pre><p>Example:</p><pre><code class="nohighlight hljs">omega ETA_CL ~ 0.10
+omega ETA_V  ~ 0.05</code></pre><p>When all omegas are specified as individual scalar lines, the resulting omega matrix is diagonal.</p><h3 id="Residual-Error-(sigma)"><a class="docs-heading-anchor" href="#Residual-Error-(sigma)">Residual Error (sigma)</a><a id="Residual-Error-(sigma)-1"></a><a class="docs-heading-anchor-permalink" href="#Residual-Error-(sigma)" title="Permalink"></a></h3><pre><code class="nohighlight hljs">sigma NAME ~ variance</code></pre><p>Example:</p><pre><code class="nohighlight hljs">sigma PROP_ERR ~ 0.01
+sigma ADD_ERR  ~ 1.0</code></pre><h2 id="[individual_parameters]-Block"><a class="docs-heading-anchor" href="#[individual_parameters]-Block"><code>[individual_parameters]</code> Block</a><a id="[individual_parameters]-Block-1"></a><a class="docs-heading-anchor-permalink" href="#[individual_parameters]-Block" title="Permalink"></a></h2><p>Plain Julia expressions mapping population parameters (thetas), random effects (ETAs), and covariates to individual PK parameters. These are compiled into efficient functions at parse time.</p><pre><code class="nohighlight hljs">[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)</code></pre><h3 id="Covariates"><a class="docs-heading-anchor" href="#Covariates">Covariates</a><a id="Covariates-1"></a><a class="docs-heading-anchor-permalink" href="#Covariates" title="Permalink"></a></h3><p>Covariates are referenced in UPPERCASE in the model file (e.g., <code>WT</code>, <code>CRCL</code>). The parser automatically detects these and maps them to the lowercase keys stored in the dataset:</p><pre><code class="nohighlight hljs">[individual_parameters]
+  CL = TVCL * (WT / 70.0)^THETA_WT * (CRCL / 100.0)^THETA_CRCL * exp(ETA_CL)
+  V1 = TVV1 * (WT / 70.0)^THETA_WT * exp(ETA_V1)</code></pre><p>Both time-constant and time-varying covariates are supported. <code>read_data</code> automatically detects time-varying covariates (those whose values change within a subject).</p><h2 id="[structural_model]-Block"><a class="docs-heading-anchor" href="#[structural_model]-Block"><code>[structural_model]</code> Block</a><a id="[structural_model]-Block-1"></a><a class="docs-heading-anchor-permalink" href="#[structural_model]-Block" title="Permalink"></a></h2><h3 id="Analytical-Models"><a class="docs-heading-anchor" href="#Analytical-Models">Analytical Models</a><a id="Analytical-Models-1"></a><a class="docs-heading-anchor-permalink" href="#Analytical-Models" title="Permalink"></a></h3><p>Reference a built-in PK model with parameter mapping:</p><pre><code class="nohighlight hljs">[structural_model]
+  pk model_symbol(param1=VAR1, param2=VAR2, ...)</code></pre><p>Available models:</p><table><tr><th style="text-align: right">Symbol</th><th style="text-align: right">Parameters</th></tr><tr><td style="text-align: right"><code>one_cpt_iv_bolus</code></td><td style="text-align: right"><code>cl, v</code></td></tr><tr><td style="text-align: right"><code>one_cpt_infusion</code></td><td style="text-align: right"><code>cl, v</code></td></tr><tr><td style="text-align: right"><code>one_cpt_oral</code></td><td style="text-align: right"><code>cl, v, ka</code> (optional: <code>f</code>)</td></tr><tr><td style="text-align: right"><code>two_cpt_iv_bolus</code></td><td style="text-align: right"><code>cl, v1, q, v2</code></td></tr><tr><td style="text-align: right"><code>two_cpt_infusion</code></td><td style="text-align: right"><code>cl, v1, q, v2</code></td></tr><tr><td style="text-align: right"><code>two_cpt_oral</code></td><td style="text-align: right"><code>cl, v1, q, v2, ka</code> (optional: <code>f</code>)</td></tr></table><p>Example:</p><pre><code class="nohighlight hljs">[structural_model]
+  pk two_cpt_oral(cl=CL, v1=V1, q=Q, v2=V2, ka=KA)</code></pre><h3 id="ODE-Models"><a class="docs-heading-anchor" href="#ODE-Models">ODE Models</a><a id="ODE-Models-1"></a><a class="docs-heading-anchor-permalink" href="#ODE-Models" title="Permalink"></a></h3><p>For models that cannot be expressed analytically:</p><pre><code class="nohighlight hljs">[structural_model]
+  ode(obs_cmt=STATE_NAME, states=[STATE1, STATE2, ...])</code></pre><ul><li><code>obs_cmt</code>: the state variable used as the observable (mapped to DV)</li><li><code>states</code>: list of all ODE state variables</li></ul><p>Example:</p><pre><code class="nohighlight hljs">[structural_model]
+  ode(obs_cmt=central, states=[depot, central])</code></pre><h2 id="[odes]-Block"><a class="docs-heading-anchor" href="#[odes]-Block"><code>[odes]</code> Block</a><a id="[odes]-Block-1"></a><a class="docs-heading-anchor-permalink" href="#[odes]-Block" title="Permalink"></a></h2><p>Required only for ODE models. Define one differential equation per state:</p><pre><code class="nohighlight hljs">[odes]
+  d/dt(STATE) = expression</code></pre><p>The expression can reference any variable defined in <code>[individual_parameters]</code>, plus the state variables themselves.</p><p>Example (Michaelis-Menten elimination):</p><pre><code class="nohighlight hljs">[odes]
+  d/dt(depot)   = -KA * depot
+  d/dt(central) = KA * depot / V - VMAX * central / (KM + central)</code></pre><p>Doses with <code>EVID=1</code> are applied as bolus additions to the first state in the <code>states</code> list (or the state matching the <code>CMT</code> column).</p><h2 id="[error_model]-Block"><a class="docs-heading-anchor" href="#[error_model]-Block"><code>[error_model]</code> Block</a><a id="[error_model]-Block-1"></a><a class="docs-heading-anchor-permalink" href="#[error_model]-Block" title="Permalink"></a></h2><p>Specifies the residual error model for the dependent variable:</p><pre><code class="nohighlight hljs">DV ~ proportional(SIGMA_NAME)
+DV ~ additive(SIGMA_NAME)
+DV ~ combined(SIGMA_PROP, SIGMA_ADD)</code></pre><ul><li><strong>Proportional</strong>: <code>Var = (IPRED * sigma)^2</code></li><li><strong>Additive</strong>: <code>Var = sigma</code></li><li><strong>Combined</strong>: <code>Var = (IPRED * sigma_prop)^2 + sigma_add</code></li></ul><h2 id="Complete-Example"><a class="docs-heading-anchor" href="#Complete-Example">Complete Example</a><a id="Complete-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-Example" title="Permalink"></a></h2><h3 id="Analytical-Model"><a class="docs-heading-anchor" href="#Analytical-Model">Analytical Model</a><a id="Analytical-Model-1"></a><a class="docs-heading-anchor-permalink" href="#Analytical-Model" title="Permalink"></a></h3><pre><code class="nohighlight hljs">model WarfarinOneCmt
+
+  [parameters]
+    theta TVCL(0.134, 0.001, 10.0)
+    theta TVV(8.1, 0.1, 100.0)
+    theta TVKA(1.0, 0.1, 10.0)
+
+    omega ETA_CL ~ 0.07
+    omega ETA_V  ~ 0.02
+    omega ETA_KA ~ 0.40
+
+    sigma PROP_ERR ~ 0.01
+
+  [individual_parameters]
+    CL = TVCL * exp(ETA_CL)
+    V  = TVV  * exp(ETA_V)
+    KA = TVKA * exp(ETA_KA)
+
+  [structural_model]
+    pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+  [error_model]
+    DV ~ proportional(PROP_ERR)
+
+end</code></pre><h3 id="ODE-Model"><a class="docs-heading-anchor" href="#ODE-Model">ODE Model</a><a id="ODE-Model-1"></a><a class="docs-heading-anchor-permalink" href="#ODE-Model" title="Permalink"></a></h3><pre><code class="nohighlight hljs">model MMOral
+
+  [parameters]
+    theta TVVMAX(3.0, 0.1, 50.0)
+    theta TVKM(5.0, 0.1, 100.0)
+    theta TVV(10.0, 1.0, 200.0)
+    theta TVKA(1.2, 0.05, 20.0)
+
+    omega ETA_VMAX ~ 0.15
+    omega ETA_V    ~ 0.10
+
+    sigma PROP_ERR ~ 0.02
+
+  [individual_parameters]
+    VMAX = TVVMAX * exp(ETA_VMAX)
+    KM   = TVKM
+    V    = TVV   * exp(ETA_V)
+    KA   = TVKA
+
+  [structural_model]
+    ode(obs_cmt=central, states=[depot, central])
+
+  [odes]
+    d/dt(depot)   = -KA * depot
+    d/dt(central) = KA * depot / V - VMAX * central / (KM + central)
+
+  [error_model]
+    DV ~ proportional(PROP_ERR)
+
+end</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="interfaces.html">« Interfaces</a><a class="docs-footer-nextpage" href="estimation_methods.html">Estimation Methods »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.25 on <span class="colophon-date" title="Thursday 2 April 2026 16:04">Thursday 2 April 2026</span>. Using Julia version 1.11.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

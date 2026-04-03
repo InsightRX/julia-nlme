@@ -162,12 +162,28 @@ ModelParameters(theta, theta_names, omega, sigma) =
 # ---------------------------------------------------------------------------
 
 """
+ODE specification for models defined with the `[odes]` block.
+
+  - `ode_fn`: in-place ODE function `(du, u, p, t)` where `p` is the
+    NamedTuple returned by `pk_param_fn`. Must be generic over `T<:Real`
+    so ForwardDiff dual numbers flow through the ODE solve.
+  - `state_names`: ordered list of state variable names (matches u indices)
+  - `obs_cmt_idx`: index into `state_names` of the observable compartment
+"""
+struct ODESpec
+    ode_fn::Function
+    state_names::Vector{Symbol}
+    obs_cmt_idx::Int
+end
+
+"""
 A model ready for estimation. The parser (or user) produces this by
 providing Julia functions for each model component.
 
   - `pk_param_fn(theta, eta, covariates) → NamedTuple` of individual PK params
-  - `pk_model`: one of the symbols registered in PKEquations
+  - `pk_model`: one of the symbols registered in PKEquations, or `:ode`
   - `error_model`: :additive | :proportional | :combined
+  - `ode_spec`: non-nothing for ODE models; `nothing` for analytical models
 """
 struct CompiledModel
     name::String
@@ -187,7 +203,16 @@ struct CompiledModel
     # Default initial parameters built from the [parameters] block.
     # Used by fit(model, population) when no init_params are supplied.
     default_params::ModelParameters
+
+    # ODE specification (nothing for analytical models)
+    ode_spec::Union{Nothing, ODESpec}
 end
+
+# Backward-compatible constructor for analytical models (no ode_spec)
+CompiledModel(name, pk_model, error_model, pk_param_fn, n_theta, n_eta, n_epsilon,
+              theta_names, eta_names, default_params) =
+    CompiledModel(name, pk_model, error_model, pk_param_fn, n_theta, n_eta, n_epsilon,
+                  theta_names, eta_names, default_params, nothing)
 
 # ---------------------------------------------------------------------------
 # Estimation results

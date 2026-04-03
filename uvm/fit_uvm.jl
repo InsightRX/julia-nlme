@@ -60,13 +60,11 @@ result = fit(model, pop;
              interaction         = true,
              run_covariance_step = true,
              verbose             = true,
-#             global_search  = false,
-#             global_maxeval = 100,
-#             n_starts       = 5,
              optimizer      = :bfgs)
 
-#             n_starts            = 5,      # run 5 starts
-#             start_jitter        = 0.5)
+result = fit_saem(
+             model, pop;
+             interaction=true, verbose=true)
 
 print_results(result)
 

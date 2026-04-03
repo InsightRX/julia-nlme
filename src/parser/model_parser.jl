@@ -369,6 +369,134 @@ function _build_init_params(theta_specs::Vector{ThetaSpec},
 end
 
 # ---------------------------------------------------------------------------
+# ODE structural model helpers
+# ---------------------------------------------------------------------------
+
+"""
+Parse `ode(obs_cmt=X, states=[A, B, ...])` from [structural_model].
+Returns `(state_names, obs_cmt_name)`.
+"""
+function _parse_ode_structural(lines::Vector{String})
+    for line in lines
+        # Match the full ode(...) with possibly nested brackets
+        m = match(r"^\s*ode\s*\((.+)\)\s*$", line)
+        m === nothing && continue
+
+        args_str = m.captures[1]
+
+        # Extract obs_cmt=<name>
+        m_obs = match(r"\bobs_cmt\s*=\s*(\w+)", args_str)
+        m_obs !== nothing || error("ode() missing obs_cmt= argument")
+        obs_cmt = Symbol(m_obs.captures[1])
+
+        # Extract states=[A, B, ...]
+        m_states = match(r"\bstates\s*=\s*\[([^\]]+)\]", args_str)
+        m_states !== nothing || error("ode() missing states=[...] argument")
+        state_names = [Symbol(strip(s)) for s in split(m_states.captures[1], ',')]
+
+        obs_cmt in state_names || error("obs_cmt=$obs_cmt not found in states=$state_names")
+        return state_names, obs_cmt
+    end
+    error("No `ode(...)` declaration found in [structural_model] block")
+end
+
+"""
+Collect all variable names assigned in an [individual_parameters] block.
+"""
+function _collect_defined_vars(lines::Vector{String})
+    defined = Symbol[]
+    for line in lines
+        line = strip(line)
+        isempty(line) || startswith(line, '#') && continue
+        expr = Meta.parse(line)
+        if expr isa Expr && expr.head == :(=)
+            push!(defined, expr.args[1])
+        end
+    end
+    return defined
+end
+
+"""
+Parse the [odes] block and return an ODESpec.
+
+Each line must have the form `d/dt(state_name) = <expression>`.
+The generated function is out-of-place with signature `(u, p, t) → SVector(...)`,
+compiled via RuntimeGeneratedFunctions to avoid world-age issues.
+
+Using an out-of-place SVector function allows OrdinaryDiffEq to use its
+static-array fast path, which eliminates heap allocations during the ODE
+integration. This is critical for performance when ForwardDiff Dual numbers
+flow through the ODE (as occurs during FOCE gradient computation).
+"""
+function _parse_odes_block(lines::Vector{String},
+                            state_names::Vector{Symbol},
+                            obs_cmt_name::Symbol,
+                            param_names::Vector{Symbol})
+
+    state_idx   = Dict(name => i for (i, name) in enumerate(state_names))
+    obs_cmt_idx = state_idx[obs_cmt_name]
+
+    # Parse each d/dt(X) = rhs line
+    equations = Dict{Symbol, Expr}()
+    for line in lines
+        line = strip(line)
+        isempty(line) || startswith(line, '#') && continue
+        # Strip trailing comment
+        line = strip(split(line, '#')[1])
+        m = match(r"^d/dt\((\w+)\)\s*=\s*(.+)$", line)
+        m !== nothing || error("Cannot parse ODE equation: \"$line\"")
+        state = Symbol(m.captures[1])
+        state in state_names || error("Unknown state variable: $state")
+        equations[state] = Meta.parse(strip(m.captures[2]))
+    end
+
+    # Build out-of-place function body:
+    #   (u, p, t) -> begin
+    #       depot = u[1]; central = u[2]   # state aliases
+    #       KA = p.KA; VMAX = p.VMAX; ...  # param aliases
+    #       _ode_d_depot   = -KA * depot
+    #       _ode_d_central = KA * depot / V - VMAX * central / (KM + central)
+    #       return SVector(_ode_d_depot, _ode_d_central)
+    #   end
+    body = Expr[]
+
+    # State aliases: depot = u[1], central = u[2], ...
+    for (name, idx) in state_idx
+        push!(body, :($name = u[$idx]))
+    end
+
+    # Parameter aliases: KA = p.KA, VMAX = p.VMAX, ...
+    for name in param_names
+        push!(body, :($name = p.$name))
+    end
+
+    # Derivative variables (avoid clobbering state/param names)
+    deriv_vars = [Symbol("_ode_d_", state_names[i]) for i in 1:length(state_names)]
+
+    # ODE equations: _ode_d_depot = rhs, etc.
+    for (state, rhs) in equations
+        idx = state_idx[state]
+        push!(body, :($(deriv_vars[idx]) = $rhs))
+    end
+
+    # Default 0 for any state without an explicit equation
+    for (name, idx) in state_idx
+        if !haskey(equations, name)
+            push!(body, :($(deriv_vars[idx]) = zero(eltype(u))))
+        end
+    end
+
+    # Return SVector of derivatives — enables OrdinaryDiffEq static-array path
+    push!(body, :(return SVector($(deriv_vars...))))
+
+    fn_body = Expr(:block, body...)
+    fn_expr = Expr(:->, Expr(:tuple, :u, :p, :t), fn_body)   # out-of-place: 3 args
+    ode_fn  = @RuntimeGeneratedFunction(fn_expr)
+
+    return ODESpec(ode_fn, state_names, obs_cmt_idx)
+end
+
+# ---------------------------------------------------------------------------
 # Top-level parse function
 # ---------------------------------------------------------------------------
 
@@ -396,23 +524,44 @@ function parse_model_string(content::AbstractString)::CompiledModel
     haskey(blocks, "error_model")            || error("Missing [error_model] block")
 
     theta_specs, omega_specs, sigma_specs = _parse_parameters(blocks["parameters"])
-    pk_model, pk_param_map                = _parse_structural_model(blocks["structural_model"])
     error_model, sigma_names              = _parse_error_model(blocks["error_model"])
 
-    fn_body, eta_names, _ = _codegen_pk_param_fn(
-        blocks["individual_parameters"],
-        theta_specs, omega_specs, pk_param_map
-    )
+    # Determine whether this is an ODE or analytical model
+    is_ode = any(l -> occursin(r"^\s*ode\s*\(", l), blocks["structural_model"])
 
-    # Build a full lambda Expr and compile via RuntimeGeneratedFunctions
-    # to avoid world-age issues from eval().
-    fn_expr = Expr(:->,
-                   Expr(:tuple, :theta, :eta, :covariates),
-                   fn_body)
-    pk_param_fn = @RuntimeGeneratedFunction(fn_expr)
+    if is_ode
+        haskey(blocks, "odes") || error("ODE model requires an [odes] block")
 
-    theta_names   = [s.name for s in theta_specs]
-    n_epsilon     = length(sigma_specs)
+        state_names, obs_cmt_name = _parse_ode_structural(blocks["structural_model"])
+
+        # pk_param_fn returns ALL defined individual params for ODE models
+        defined_vars = _collect_defined_vars(blocks["individual_parameters"])
+        pk_param_map = Dict{Symbol, Symbol}(v => v for v in defined_vars)
+
+        fn_body, eta_names, _ = _codegen_pk_param_fn(
+            blocks["individual_parameters"], theta_specs, omega_specs, pk_param_map)
+
+        fn_expr = Expr(:->, Expr(:tuple, :theta, :eta, :covariates), fn_body)
+        pk_param_fn = @RuntimeGeneratedFunction(fn_expr)
+
+        param_names = collect(keys(pk_param_map))
+        ode_spec    = _parse_odes_block(blocks["odes"], state_names, obs_cmt_name, param_names)
+        pk_model    = :ode
+
+    else
+        pk_model, pk_param_map = _parse_structural_model(blocks["structural_model"])
+
+        fn_body, eta_names, _ = _codegen_pk_param_fn(
+            blocks["individual_parameters"], theta_specs, omega_specs, pk_param_map)
+
+        fn_expr = Expr(:->, Expr(:tuple, :theta, :eta, :covariates), fn_body)
+        pk_param_fn = @RuntimeGeneratedFunction(fn_expr)
+
+        ode_spec = nothing
+    end
+
+    theta_names    = [s.name for s in theta_specs]
+    n_epsilon      = length(sigma_specs)
     default_params = _build_init_params(theta_specs, omega_specs, sigma_specs)
 
     return CompiledModel(
@@ -425,6 +574,7 @@ function parse_model_string(content::AbstractString)::CompiledModel
         n_epsilon,
         theta_names,
         eta_names,
-        default_params
+        default_params,
+        ode_spec
     )
 end
