@@ -211,20 +211,25 @@ end
 # Simulate from explicit parameter values (no prior fit needed).
 # omega_diag: diagonal BSV variances (length n_eta); off-diagonals are set to zero.
 function r_simulate_params(model_key::String, data_csv::String,
-                            theta::Vector{Float64},
-                            omega_diag::Vector{Float64},
-                            sigma::Vector{Float64};
+                            theta::Union{Vector{Float64}, Float64},
+                            omega_diag::Union{Vector{Float64}, Float64},
+                            sigma::Union{Vector{Float64}, Float64};
                             n_sims::Int = 1)::String
     model = _model_cache[model_key]
     dp    = model.default_params
 
-    omega  = JuliaNLME.OmegaMatrix(Matrix(Diagonal(omega_diag)), dp.omega.eta_names;
+    # JuliaCall passes length-1 R vectors as scalars; vcat normalises both cases
+    theta_v     = vcat(theta)
+    omega_diag_v = vcat(omega_diag)
+    sigma_v     = vcat(sigma)
+
+    omega  = JuliaNLME.OmegaMatrix(Matrix(Diagonal(omega_diag_v)), dp.omega.eta_names;
                                     diagonal = dp.omega.diagonal)
     params = JuliaNLME.ModelParameters(
-        theta, dp.theta_names,
+        theta_v, dp.theta_names,
         dp.theta_lower, dp.theta_upper,
         omega,
-        JuliaNLME.SigmaMatrix(sigma, dp.sigma.names),
+        JuliaNLME.SigmaMatrix(sigma_v, dp.sigma.names),
         dp.packed_fixed
     )
 
