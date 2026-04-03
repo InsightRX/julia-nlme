@@ -104,6 +104,16 @@ function individual_nll(eta::AbstractVector{T},
     theta = T.(params.theta)
     ipred = compute_predictions(model, subject, theta, eta)
 
+    # Guard: ODE solver (or PK equations) may return non-finite predictions when
+    # the optimizer explores extreme η values (e.g. stiff ODE with large VMAX).
+    # Return a large penalty with gradient pointing back toward η=0 so that
+    # BFGS/NelderMead steps away from the infeasible region rather than getting
+    # NaN gradients.  ForwardDiff.value is identity for Float64 and extracts
+    # the primal value from Dual numbers.
+    if any(x -> !isfinite(ForwardDiff.value(x)), ipred)
+        return T(1e10) + T(1e5) * sum(abs2, eta)
+    end
+
     n   = length(subject.observations)
     nll = zero(T)
 

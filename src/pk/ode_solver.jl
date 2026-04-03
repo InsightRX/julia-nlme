@@ -49,7 +49,10 @@ function _ode_pred_sv(::Val{N}, ode_spec::ODESpec, pk_params::NamedTuple,
     # SVector initial condition: zero partials, stack-allocated, no heap use
     u       = zero(SVector{N, T})
     n_obs   = length(subject.obs_times)
-    obs_out = Vector{T}(undef, n_obs)
+    # NaN-fill so that partially-failed ODE integrations (e.g. stiff system
+    # causing Tsit5 NaN-dt exit) produce detectable non-finite predictions
+    # rather than uninitialized garbage.
+    obs_out = fill(T(NaN), n_obs)
 
     obs_time_idx = Dict{Float64, Int}(t => i for (i, t) in enumerate(subject.obs_times))
 

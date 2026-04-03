@@ -167,5 +167,10 @@ function initial_packed(params::ModelParameters)
     lower = vcat(lower_theta, lower_omega, lower_sigma)
     upper = vcat(upper_theta, upper_omega, upper_sigma)
 
+    # Clamp initial point to bounds. This is needed when x0 comes from a
+    # warm-start (e.g. ITS → FOCE) where estimates may lie outside the FOCE
+    # box constraints (e.g. ITS omega collapse → packed value < lower_omega).
+    x0 = clamp.(x0, lower, upper)
+
     return x0, lower, upper
 end

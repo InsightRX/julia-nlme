@@ -34,15 +34,16 @@ true_omega_V    = 0.10   # variance on V    (~32% CV)
 
 true_sigma_prop = 0.02   # proportional residual error variance (14% CV)
 
+lloq      = 0.01    # lower limit of quantification (mg/L); observations below LLOQ are excluded (MDV=1)
 obs_times = [0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 24.0, 36.0, 48.0]
-dose_amt  = 100.0   # mg, single oral dose
+dose_amt  = 200.0   # mg, single oral dose
 
 # ---------------------------------------------------------------------------
 # Simulate a population using OrdinaryDiffEq directly
 # ---------------------------------------------------------------------------
 
 function simulate_mm_subject(id, dose, times, TVVMAX, TVKM, TVV, TVKA,
-                               ω_VMAX, ω_V, σ_prop)
+                               ω_VMAX, ω_V, σ_prop, lloq)
     # Individual parameters (log-normal BSV)
     VMAX = TVVMAX * exp(sqrt(ω_VMAX) * randn())
     KM   = TVKM
@@ -67,8 +68,14 @@ function simulate_mm_subject(id, dose, times, TVVMAX, TVKM, TVV, TVKA,
     for (t, u) in zip(sol.t, sol.u)
         ipred = u[2]   # central compartment concentration (mg/L)
         dv    = ipred * (1 + sqrt(σ_prop) * randn())
-        push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.001),
-                     EVID=0, MDV=0, CMT=2, RATE=0.0))
+        blq   = dv < lloq
+        # BLQ observations are flagged MDV=1 (excluded from likelihood) but
+        # retained in the dataset so the time grid is complete for plotting.
+        push!(rows, (ID=id, TIME=t, AMT=missing,
+                     DV   = blq ? lloq : dv,
+                     EVID = 0,
+                     MDV  = blq ? 1 : 0,
+                     CMT  = 2, RATE=0.0))
     end
     return rows
 end
@@ -77,7 +84,7 @@ all_rows = []
 for id in 1:20
     append!(all_rows, simulate_mm_subject(id, dose_amt, obs_times,
                                            true_TVVMAX, true_TVKM, true_TVV, true_TVKA,
-                                           true_omega_VMAX, true_omega_V, true_sigma_prop))
+                                           true_omega_VMAX, true_omega_V, true_sigma_prop, lloq))
 end
 df = DataFrame(all_rows)
 
@@ -92,11 +99,17 @@ model = parse_model_file(joinpath(@__DIR__, "mm_oral.jnlme"))
 println("Model: $(model.name)  (pk_model=$(model.pk_model))")
 
 # ---------------------------------------------------------------------------
-# Fit using FOCE-I
+# Fit using ITS → FOCE-I warm-start
 # ---------------------------------------------------------------------------
 
-println("\nFitting ODE model via FOCE-I...")
-result = fit(model, pop;
+println("\nStage 1: ITS (fast initialization)...")
+its_result = fit_its(model, pop; verbose = true)
+
+println("\nITS estimates:")
+print_results(its_result)
+
+println("\nStage 2: FOCE-I warm-started from ITS estimates...")
+result = fit(model, pop, its_result;
              interaction         = true,
              outer_maxiter       = 400,
              run_covariance_step = true,

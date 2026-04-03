@@ -70,6 +70,17 @@ function fit(model::CompiledModel, population::Population; kwargs...)::FitResult
 end
 
 """
+    fit(model, population, prev_result::FitResult; kwargs...)
+
+Warm-start FOCE from the estimates of a previous fit (e.g., from `fit_its` or a prior FOCE run).
+Extracts `ModelParameters` from `prev_result` and passes them as initial values.
+"""
+function fit(model::CompiledModel, population::Population,
+             prev_result::FitResult; kwargs...)::FitResult
+    return fit(model, population, _params_from_fit(prev_result); kwargs...)
+end
+
+"""
     fit(model, population, init_params; kwargs...)
 
 Fit a compiled model to a population dataset.
