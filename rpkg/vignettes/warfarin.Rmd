@@ -108,7 +108,7 @@ end
 Parse it with `jnlme_model()`:
 
 ```{r}
-model_path <- system.file("examples/warfarin_oral.jnlme", package = "julianlme")
+model_path <- system.file"examples/warfarin_oral.jnlme"
 # Or use an absolute path:
 # model_path <- "/path/to/julia-nlme/examples/warfarin_oral.jnlme"
 
@@ -310,16 +310,14 @@ p2 <- ggplot(obs, aes(x = IPRED, y = DV)) +
   geom_point(alpha = 0.7) +
   geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
   labs(x = "Individual prediction (IPRED)", y = "Observed (DV)",
-       title = "DV vs IPRED") +
-  theme_bw()
+       title = "DV vs IPRED")
 
 # CWRES vs TIME
 p3 <- ggplot(obs, aes(x = TIME, y = CWRES)) +
   geom_point(alpha = 0.7) +
   geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
   geom_hline(yintercept = c(-2, 2), color = "grey50", linetype = "dotted") +
-  labs(x = "Time (h)", y = "CWRES", title = "CWRES vs Time") +
-  theme_bw()
+  labs(x = "Time (h)", y = "CWRES", title = "CWRES vs Time")
 
 # Individual profiles
 etas <- result$etas
@@ -346,37 +344,9 @@ Generate 200 simulation replicates from the fitted model for a
 visual predictive check:
 
 ```{r}
+library(vpc)
 vpc_sims <- jnlme_simulate(model, data, result, n_sims = 200)
-
-# vpc_sims has columns: id, time, dv, pred, ipred, _sim
-# Compute 5th, 50th, 95th percentiles of simulated DV at each time point
-library(dplyr)
-
-vpc_pi <- vpc_sims |>
-  group_by(time) |>
-  summarise(
-    p05 = quantile(dv, 0.05),
-    p50 = quantile(dv, 0.50),
-    p95 = quantile(dv, 0.95)
-  )
-
-obs_pi <- obs |>
-  group_by(TIME) |>
-  summarise(
-    p05 = quantile(DV, 0.05),
-    p50 = quantile(DV, 0.50),
-    p95 = quantile(DV, 0.95)
-  )
-
-ggplot() +
-  geom_ribbon(data = vpc_pi, aes(x = time, ymin = p05, ymax = p95),
-              fill = "steelblue", alpha = 0.3) +
-  geom_line(data = vpc_pi, aes(x = time, y = p50),
-            color = "steelblue", linewidth = 1) +
-  geom_point(data = obs, aes(x = TIME, y = DV), size = 1.5) +
-  labs(x = "Time (h)", y = "Concentration",
-       title = "Visual Predictive Check (5th–95th PI)") +
-  theme_bw()
+vpc(obs = obs, sim = vpc_sims, sim_cols = list(idv = "time"))
 ```
 
 ## Alternative Estimation Methods
