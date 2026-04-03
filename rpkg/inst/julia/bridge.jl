@@ -143,7 +143,7 @@ function r_fit(model_key::String, data_csv::String;
                verbose::Bool             = true)::Dict{String, Any}
 
     model  = _model_cache[model_key]
-    df     = CSV.read(data_csv, DataFrame)
+    df     = CSV.read(data_csv, DataFrame; missingstring = [".", "NA", ""])
     result = JuliaNLME.fit(model, df;
                             interaction, outer_maxiter, outer_gtol,
                             inner_maxiter, run_covariance_step,
@@ -163,7 +163,7 @@ function r_fit_its(model_key::String, data_csv::String;
                    verbose::Bool             = true)::Dict{String, Any}
 
     model  = _model_cache[model_key]
-    df     = CSV.read(data_csv, DataFrame)
+    df     = CSV.read(data_csv, DataFrame; missingstring = [".", "NA", ""])
     result = JuliaNLME.fit_its(model, df;
                                 n_iter, conv_window, rel_tol,
                                 run_covariance_step, interaction,
@@ -183,7 +183,7 @@ function r_fit_saem(model_key::String, data_csv::String;
                     verbose::Bool             = true)::Dict{String, Any}
 
     model  = _model_cache[model_key]
-    df     = CSV.read(data_csv, DataFrame)
+    df     = CSV.read(data_csv, DataFrame; missingstring = [".", "NA", ""])
     result = JuliaNLME.fit_saem(model, df;
                                   n_iter_exploration, n_iter_convergence,
                                   n_mh_steps, run_covariance_step,
@@ -201,7 +201,7 @@ function r_simulate(model_key::String, result_key::String, data_csv::String;
                     n_sims::Int = 1)::String
     model  = _model_cache[model_key]
     result = _result_cache[result_key]
-    df     = CSV.read(data_csv, DataFrame)
+    df     = CSV.read(data_csv, DataFrame; missingstring = [".", "NA", ""])
     sim_df = JuliaNLME.simulate(model, result, df; n_sims)
     out    = tempname() * ".csv"
     CSV.write(out, sim_df)
@@ -233,7 +233,7 @@ function r_simulate_params(model_key::String, data_csv::String,
         dp.packed_fixed
     )
 
-    df     = CSV.read(data_csv, DataFrame)
+    df     = CSV.read(data_csv, DataFrame; missingstring = [".", "NA", ""])
     sim_df = JuliaNLME.simulate(model, params, df; n_sims)
     out    = tempname() * ".csv"
     CSV.write(out, sim_df)
