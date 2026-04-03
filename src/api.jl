@@ -297,31 +297,117 @@ function _lhs_starts(template::ModelParameters,
 end
 
 # ---------------------------------------------------------------------------
-# simulate() — forward simulation from a FitResult or given parameters
+# simulate() — forward simulation from a FitResult or ModelParameters
 # ---------------------------------------------------------------------------
 
-"""
-    simulate(model, population, params; n_sim=1)
+# Extract ModelParameters from a FitResult, reconstructing from the stored estimates.
+function _params_from_fit(result::FitResult)
+    mp = result.model.default_params
+    omega = OmegaMatrix(result.omega, mp.omega.eta_names; diagonal = mp.omega.diagonal)
+    ModelParameters(result.theta, mp.theta_names, mp.theta_lower, mp.theta_upper,
+                    omega, SigmaMatrix(result.sigma, mp.sigma.names), mp.packed_fixed)
+end
 
-Simulate observations from the model for each subject in `population`.
-Returns a DataFrame with columns: ID, TIME, IPRED, PRED, DV_SIM.
+"""
+    simulate(model, params_or_result, data; n_sims=1, output_columns=nothing, rng=...)
+
+Simulate observations from a model for a dataset.
+
+Arguments:
+  - `model`: a `CompiledModel`
+  - `params_or_result`: a `ModelParameters` or `FitResult`
+  - `data`: a `DataFrame` (NONMEM format) or a file path string
+
+Keyword arguments:
+  - `n_sims`: number of simulation replicates (default 1). Each replicate draws
+    a new set of individual parameters ``\\eta_i \\sim N(0, \\Omega)`` for every subject.
+  - `output_columns`: columns to include in the output (default: all observation-row
+    columns from `data`, with `dv` replaced by the simulated value). The columns
+    `pred`, `ipred`, and `_sim` are always appended.
+  - `rng`: random number generator
+
+Returns a `DataFrame`. Each row corresponds to one observation in one simulation
+replicate. The `_sim` column holds the replicate index (1 to `n_sims`).
 """
 function simulate(model::CompiledModel,
-                   population::Population,
-                   params::ModelParameters;
-                   n_sim::Int = 1,
-                   rng = Random.default_rng())
+                   params_or_result::Union{ModelParameters, FitResult},
+                   data::DataFrame;
+                   n_sims::Int = 1,
+                   output_columns::Union{Nothing, Vector{Symbol}} = nothing,
+                   rng::Random.AbstractRNG = Random.default_rng())::DataFrame
 
-    rows = []
-    for subject in population.subjects
-        eta_hat = zeros(model.n_eta)  # population prediction
-        ipred   = Float64.(compute_predictions(model, subject, params.theta, eta_hat))
-        for j in eachindex(subject.obs_times)
-            V    = residual_variance(model.error_model, ipred[j], params.sigma.values)
-            dv_sim = ipred[j] + sqrt(V) * randn(rng)
-            push!(rows, (ID=subject.id, TIME=subject.obs_times[j],
-                         IPRED=ipred[j], DV_SIM=dv_sim))
+    params = params_or_result isa FitResult ?
+        _params_from_fit(params_or_result) : params_or_result
+
+    # Normalise column names to lowercase (non-destructive copy)
+    df = copy(data)
+    _normalise_cols(df)
+
+    # Fill optional columns so filtering is unambiguous
+    for (col, default) in [(:evid, 0), (:mdv, 0), (:amt, missing), (:cmt, 1),
+                            (:rate, 0.0), (:ii, 0.0), (:ss, 0)]
+        col in propertynames(df) || (df[!, col] .= default)
+    end
+
+    # Parse into Population (for doses, covariates, obs ordering)
+    population = read_data(df)
+
+    # Observation rows: same filter as _parse_subject
+    obs_mask = (df.evid .== 0) .&
+               (coalesce.(df.mdv, 0) .== 0) .&
+               (.!ismissing.(df.dv))
+    obs_df = df[obs_mask, :]
+
+    # Default output columns: all columns in the observation rows
+    src_cols = output_columns !== nothing ? output_columns :
+               [c for c in propertynames(obs_df)
+                if c ∉ (:evid, :mdv, :amt, :cmt, :rate, :ii, :ss)]
+
+    # Columns always appended (skip if user already listed them)
+    extra_cols = [c for c in (:pred, :ipred, :_sim) if c ∉ src_cols]
+
+    all_out_cols = vcat(src_cols, extra_cols)
+
+    # Use typed vectors for columns with known element types to avoid Vector{Any}
+    _sim_cols = Set((:dv, :pred, :ipred))
+    col_vecs = Dict{Symbol, AbstractVector}(
+        c => (c ∈ _sim_cols ? Float64[] : c == :_sim ? Int[] : Any[])
+        for c in all_out_cols)
+
+    for sim_idx in 1:n_sims
+        for subject in population.subjects
+            # Sample individual parameters η ~ N(0, Ω)
+            η = params.omega.chol * randn(rng, model.n_eta)
+
+            pred  = Float64.(compute_predictions(model, subject, params.theta,
+                                                  zeros(model.n_eta)))
+            ipred = Float64.(compute_predictions(model, subject, params.theta, η))
+
+            # Observation rows for this subject (order matches subject.obs_times)
+            subj_rows = obs_df[obs_df.id .== subject.id, :]
+
+            for j in eachindex(subject.obs_times)
+                V      = residual_variance(model.error_model, ipred[j], params.sigma.values)
+                dv_sim = ipred[j] + sqrt(max(V, 0.0)) * randn(rng)
+
+                src_row = subj_rows[j, :]
+                for col in src_cols
+                    val = if col == :dv;    dv_sim
+                          elseif col == :pred;  pred[j]
+                          elseif col == :ipred; ipred[j]
+                          elseif col == :_sim;  sim_idx
+                          else src_row[col]
+                          end
+                    push!(col_vecs[col], val)
+                end
+                for col in extra_cols
+                    push!(col_vecs[col],
+                          col == :pred ? pred[j] : col == :ipred ? ipred[j] : sim_idx)
+                end
+            end
         end
     end
-    return DataFrame(rows)
+
+    return DataFrame([col => col_vecs[col] for col in all_out_cols])
 end
+

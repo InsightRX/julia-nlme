@@ -15,6 +15,7 @@ makedocs(;
         "Interfaces" => "interfaces.md",
         "Model File Format" => "model_file_format.md",
         "Estimation Methods" => "estimation_methods.md",
+        "Diagnostics" => "diagnostics.md",
         "Examples" => [
             "1-Cpt Oral (Warfarin)" => "examples/warfarin.md",
             "2-Cpt IV Bolus" => "examples/two_cpt_iv.md",

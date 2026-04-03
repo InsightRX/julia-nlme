@@ -56,6 +56,7 @@ end
 # Statistics
 include("stats/residual_error.jl")
 include("stats/likelihood.jl")
+include("stats/vpc.jl")
 
 # Estimation
 include("estimation/parameterization.jl")
@@ -68,6 +69,7 @@ include("estimation/importance_sampling.jl")
 # IO
 include("io/datareader.jl")
 include("io/output.jl")
+include("io/plots.jl")
 
 # Model DSL parser
 include("parser/model_parser.jl")
@@ -84,6 +86,8 @@ export read_data
 export parse_model_file, parse_model_string
 export print_results, parameter_table, sdtab
 export residual_variance, compute_R_diag, iwres, cwres
+export vpc, VPCResult
+export plot_vpc
 export pack_params, unpack_params
 
 # Types

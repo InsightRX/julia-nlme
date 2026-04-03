@@ -15,7 +15,8 @@ JuliaNLME provides population pharmacokinetic (PK) model estimation using the **
 - **Covariate support**: time-constant and time-varying covariates with automatic detection
 - **Model file format** (`.jnlme`): declarative model specification with parameters, individual-level equations, structural model, and error model
 - **NONMEM-compatible data format**: reads standard NONMEM CSV datasets
-- **Post-estimation diagnostics**: IWRES, CWRES, goodness-of-fit outputs, SDTAB generation
+- **Post-estimation diagnostics**: PRED, IPRED, CWRES, IWRES, ETA shrinkage, SDTAB output
+- **Visual Predictive Check (VPC)**: simulation-based model adequacy diagnostic with prediction correction and stratification
 - **Importance sampling** for parameter uncertainty (standard errors and non-parametric confidence intervals)
 - **Multi-start optimization** with Latin Hypercube Sampling
 - **Covariance step** via Hessian inversion for standard error computation

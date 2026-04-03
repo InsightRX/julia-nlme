@@ -36,6 +36,14 @@ parameter_table
 sdtab
 ```
 
+## VPC
+
+```@docs
+vpc
+plot_vpc
+VPCResult
+```
+
 ## Residual Functions
 
 ```@docs
