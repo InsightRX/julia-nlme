@@ -483,3 +483,9 @@ end
 
 fit_saem(model::CompiledModel, population::Population; kwargs...) =
     fit_saem(model, population, model.default_params; kwargs...)
+
+fit_saem(model::CompiledModel, data::DataFrame, init_params::ModelParameters; kwargs...) =
+    fit_saem(model, read_data(data), init_params; kwargs...)
+
+fit_saem(model::CompiledModel, data::DataFrame; kwargs...) =
+    fit_saem(model, read_data(data); kwargs...)

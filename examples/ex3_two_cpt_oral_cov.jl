@@ -17,6 +17,8 @@ Run from the package root:
 
 using JuliaNLME, DataFrames, Random, Printf, TidierPlots
 
+include("utils.jl")
+
 # ---------------------------------------------------------------------------
 # True population parameters
 # ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ true_omega = [0.10, 0.10, 0.05, 0.05, 0.15]   # ETA_CL, V1, Q, V2, KA
 true_sigma = [0.02]
 
 # ---------------------------------------------------------------------------
-# Simulate 30 subjects — WT constant, CRCL declines over time
+# Parse model and simulate 30 subjects — WT constant, CRCL declines over time
 # ---------------------------------------------------------------------------
 #
 # CRCL(t) = max(crcl_0 - rate * t, 20)
@@ -39,40 +41,36 @@ true_sigma = [0.02]
 
 obs_times = [0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 24.0, 36.0, 48.0]
 
+model = parse_model_file(joinpath(@__DIR__, "two_cpt_oral_cov.jnlme"))
+
 Random.seed!(456)
 
-function simulate_subject(id, dose, times, θ, ω_var, σ_var, wt, crcl_0, crcl_rate)
-    tvcl, tvv1, tvq, tvv2, tvka, θ_wt, θ_crcl = θ
-    eta_cl = sqrt(ω_var[1]) * randn()
-    v1 = tvv1 * (wt/70)^θ_wt * exp(sqrt(ω_var[2]) * randn())
-    q  = tvq  * exp(sqrt(ω_var[3]) * randn())
-    v2 = tvv2 * exp(sqrt(ω_var[4]) * randn())
-    ka = tvka * exp(sqrt(ω_var[5]) * randn())
-    rows = []
-    # Dose record: CRCL at baseline
-    push!(rows, (ID=id, TIME=0.0, AMT=dose, DV=missing, EVID=1, MDV=1, CMT=1, RATE=0.0,
-                 WT=wt, CRCL=crcl_0))
-    for t in times
-        crcl_t = max(crcl_0 - crcl_rate * t, 20.0)
-        cl_t   = tvcl * (wt/70)^θ_wt * (crcl_t/100)^θ_crcl * exp(eta_cl)
-        ipred  = two_cpt_oral(; cl=cl_t, v1=v1, q=q, v2=v2, ka=ka, dose=dose, t=t)
-        dv     = ipred * (1 + sqrt(σ_var[1]) * randn())
-        push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.001), EVID=0, MDV=0, CMT=1, RATE=0.0,
-                     WT=wt, CRCL=crcl_t))
-    end
-    return rows
-end
+true_params = ModelParameters(
+    true_theta, [:TVCL, :TVV1, :TVQ, :TVV2, :TVKA, :THETA_WT, :THETA_CRCL],
+    OmegaMatrix(true_omega, [:ETA_CL, :ETA_V1, :ETA_Q, :ETA_V2, :ETA_KA]),
+    SigmaMatrix(true_sigma, [:PROP_ERR])
+)
 
-all_rows = []
+df = create_dataset(1:30, 250.0, obs_times)
+df[!, :WT]   = zeros(nrow(df))
+df[!, :CRCL] = zeros(nrow(df))
+
 for id in 1:30
     wt        = clamp(70.0 + 15.0 * randn(), 45.0, 120.0)
     crcl_0    = clamp(90.0 + 25.0 * randn(), 30.0, 150.0)
     crcl_rate = rand() * 0.5     # 0–0.5 mL/min per hour
-    append!(all_rows, simulate_subject(id, 250.0, obs_times,
-                                       true_theta, true_omega, true_sigma,
-                                       wt, crcl_0, crcl_rate))
+    id_mask = df.ID .== id
+    df[id_mask .& (df.EVID .== 1), :WT]   .= wt
+    df[id_mask .& (df.EVID .== 1), :CRCL] .= crcl_0
+    for (j, t) in enumerate(obs_times)
+        row = findfirst(id_mask .& (df.EVID .== 0) .& (df.TIME .== t))
+        df[row, :WT]   = wt
+        df[row, :CRCL] = max(crcl_0 - crcl_rate * t, 20.0)
+    end
 end
-df = DataFrame(all_rows)
+
+sim_out = simulate(model, true_params, df)
+df[df.EVID .== 0, :DV] = sim_out.dv
 
 # ---------------------------------------------------------------------------
 # Load dataset
@@ -80,13 +78,9 @@ df = DataFrame(all_rows)
 # CRCL varies within subjects     → stored in subject.tvcov (detected automatically)
 # ---------------------------------------------------------------------------
 
-pop = read_data(df)
-println("Loaded $(length(pop)) subjects, $(sum(s->length(s.observations), pop.subjects)) observations")
-
-s1 = pop[1]
-println("Subject 1 — time-constant covariates: $(keys(s1.covariates))")
-println("Subject 1 — time-varying  covariates: $(keys(s1.tvcov))")
-println("Subject 1 CRCL over time: $(round.(s1.tvcov[:crcl], digits=1))")
+println("Simulated $(length(unique(df.ID))) subjects, $(sum(df.EVID .== 0)) observations")
+s1_obs = filter(r -> r.ID == 1 && r.EVID == 0, df)
+println("Subject 1 WT=$(round(s1_obs.WT[1], digits=1))  CRCL over time: $(round.(s1_obs.CRCL, digits=1))")
 
 # ---------------------------------------------------------------------------
 # Build initial parameters (deliberately offset from truth)
@@ -103,12 +97,10 @@ init_params = ModelParameters(
 )
 
 # ---------------------------------------------------------------------------
-# Parse model and fit
+# Fit
 # ---------------------------------------------------------------------------
 
-model = parse_model_file(joinpath(@__DIR__, "two_cpt_oral_cov.jnlme"))
-
-result = fit(model, pop, init_params;
+result = fit(model, df, init_params;
              outer_maxiter = 500,
              run_covariance_step = true,
              interaction = true,
@@ -128,7 +120,7 @@ println("\nTrue values:")
 # Observations table
 # ---------------------------------------------------------------------------
 
-tab = sdtab(result, pop)
+tab = sdtab(result, df)
 println("\nObservations table (first 10 rows):")
 display(first(tab, 10))
 
@@ -158,9 +150,8 @@ println("\nGOF plots saved.")
 # ---------------------------------------------------------------------------
 
 # Build a long-format DataFrame of CRCL observations per subject per time
-crcl_rows = [(ID=s.id, TIME=s.obs_times[j], CRCL=s.tvcov[:crcl][j])
-             for s in pop.subjects for j in eachindex(s.obs_times)]
-crcl_df = DataFrame(crcl_rows)
+obs_df = filter(:EVID => ==(0), df)
+crcl_df = obs_df[!, [:ID, :TIME, :CRCL]]
 crcl_df[!, :ID_str] = string.(crcl_df.ID)   # for colour grouping
 
 p_crcl = ggplot(crcl_df, @aes(x = TIME, y = CRCL, color = ID_str)) +
@@ -175,11 +166,12 @@ println("CRCL profile plot saved to examples/crcl_profiles.png")
 # Covariate-ETA plots: use baseline CRCL (first obs time ≈ t=0.5) and WT
 # ---------------------------------------------------------------------------
 
+subj_first = combine(groupby(obs_df, :ID), first)
 sub_df = DataFrame(
-    ID          = [s.id for s in pop.subjects],
-    ETA_CL      = [result.subjects[i].eta[1] for i in 1:length(pop.subjects)],
-    WT          = [s.covariates[:wt]      for s in pop.subjects],
-    CRCL_base   = [s.tvcov[:crcl][1]     for s in pop.subjects],   # CRCL at first obs ≈ baseline
+    ID        = subj_first.ID,
+    ETA_CL    = [result.subjects[i].eta[1] for i in 1:nrow(subj_first)],
+    WT        = subj_first.WT,
+    CRCL_base = subj_first.CRCL,   # CRCL at first obs ≈ baseline
 )
 
 p3 = ggplot(sub_df, @aes(x = WT, y = ETA_CL)) +

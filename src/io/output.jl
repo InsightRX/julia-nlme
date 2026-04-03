@@ -90,6 +90,9 @@ function sdtab(result::FitResult, population::Population)::DataFrame
     return DataFrame(rows)
 end
 
+sdtab(result::FitResult, data::DataFrame)::DataFrame =
+    sdtab(result, read_data(data))
+
 # ---------------------------------------------------------------------------
 # Print summary
 # ---------------------------------------------------------------------------

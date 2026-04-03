@@ -328,3 +328,9 @@ end
 
 fit_its(model::CompiledModel, population::Population; kwargs...) =
     fit_its(model, population, model.default_params; kwargs...)
+
+fit_its(model::CompiledModel, data::DataFrame, init_params::ModelParameters; kwargs...) =
+    fit_its(model, read_data(data), init_params; kwargs...)
+
+fit_its(model::CompiledModel, data::DataFrame; kwargs...) =
+    fit_its(model, read_data(data); kwargs...)

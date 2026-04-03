@@ -69,6 +69,9 @@ function fit(model::CompiledModel, population::Population; kwargs...)::FitResult
     return fit(model, population, model.default_params; kwargs...)
 end
 
+fit(model::CompiledModel, data::DataFrame; kwargs...)::FitResult =
+    fit(model, read_data(data); kwargs...)
+
 """
     fit(model, population, prev_result::FitResult; kwargs...)
 
@@ -79,6 +82,10 @@ function fit(model::CompiledModel, population::Population,
              prev_result::FitResult; kwargs...)::FitResult
     return fit(model, population, _params_from_fit(prev_result); kwargs...)
 end
+
+fit(model::CompiledModel, data::DataFrame,
+    prev_result::FitResult; kwargs...)::FitResult =
+    fit(model, read_data(data), prev_result; kwargs...)
 
 """
     fit(model, population, init_params; kwargs...)
@@ -234,6 +241,10 @@ function fit(model::CompiledModel,
     )
 end
 
+fit(model::CompiledModel, data::DataFrame,
+    init_params::ModelParameters; kwargs...)::FitResult =
+    fit(model, read_data(data), init_params; kwargs...)
+
 """
     fit(model_string_or_path, population, init_params; kwargs...)
 
@@ -250,6 +261,10 @@ function fit(model_src::AbstractString,
     end
     return fit(model, population, init_params; kwargs...)
 end
+
+fit(model_src::AbstractString, data::DataFrame,
+    init_params::ModelParameters; kwargs...)::FitResult =
+    fit(model_src, read_data(data), init_params; kwargs...)
 
 # Placeholder — actual implementation inspects the compiled model's param function AST
 # For now, return an empty list (covariate injection is handled with defaults)

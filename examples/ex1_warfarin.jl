@@ -5,10 +5,12 @@ Run from the package root:
   julia --project examples/run_warfarin.jl
 """
 
-using JuliaNLME, DataFrames, TidierPlots
+using JuliaNLME, DataFrames, Random, TidierPlots
+
+include("utils.jl")
 
 # ---------------------------------------------------------------------------
-# Simulate a small dataset (5 subjects, oral single dose 100 mg)
+# True population parameters
 # ---------------------------------------------------------------------------
 
 true_theta = [0.134, 8.1, 1.0]   # TVCL, TVV, TVKA
@@ -17,35 +19,25 @@ true_sigma  = [0.01]              # proportional error variance
 
 obs_times = [0.5, 1.0, 2.0, 4.0, 8.0, 12.0, 24.0, 48.0, 72.0, 96.0, 120.0]
 
-using Random
+# ---------------------------------------------------------------------------
+# Parse model and simulate a small dataset (10 subjects, oral single dose 100 mg)
+# ---------------------------------------------------------------------------
+
+model = parse_model_file(joinpath(@__DIR__, "warfarin_oral.jnlme"))
+
 Random.seed!(42)
 
-function simulate_subject(id, dose, times, θ, ω_var, σ_var)
-    cl = θ[1] * exp(sqrt(ω_var[1]) * randn())
-    v  = θ[2] * exp(sqrt(ω_var[2]) * randn())
-    ka = θ[3] * exp(sqrt(ω_var[3]) * randn())
-    rows = []
-    push!(rows, (ID=id, TIME=0.0, AMT=dose, DV=missing, EVID=1, MDV=1, CMT=1, RATE=0.0))
-    for t in times
-        ipred = one_cpt_oral(; cl=cl, v=v, ka=ka, dose=dose, t=t)
-        dv    = ipred * (1 + sqrt(σ_var[1]) * randn())
-        push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.01), EVID=0, MDV=0, CMT=1, RATE=0.0))
-    end
-    return rows
-end
+true_params = ModelParameters(
+    true_theta, [:TVCL, :TVV, :TVKA],
+    OmegaMatrix(true_omega, [:ETA_CL, :ETA_V, :ETA_KA]),
+    SigmaMatrix(true_sigma, [:PROP_ERR])
+)
 
-all_rows = []
-for id in 1:10
-    append!(all_rows, simulate_subject(id, 100.0, obs_times, true_theta, true_omega, true_sigma))
-end
-df = DataFrame(all_rows)
+df = create_dataset(1:10, 100.0, obs_times)
+sim_out = simulate(model, true_params, df)
+df[df.EVID .== 0, :DV] = sim_out.dv
 
-# ---------------------------------------------------------------------------
-# Load dataset
-# ---------------------------------------------------------------------------
-
-pop = read_data(df)
-println("Loaded $(length(pop)) subjects, $(sum(s->length(s.observations), pop.subjects)) observations")
+println("Simulated $(length(unique(df.ID))) subjects, $(sum(df.EVID .== 0)) observations")
 
 # ---------------------------------------------------------------------------
 # Build initial parameters
@@ -60,12 +52,10 @@ init_params = ModelParameters(
 )
 
 # ---------------------------------------------------------------------------
-# Parse model and fit
+# Fit
 # ---------------------------------------------------------------------------
 
-model = parse_model_file(joinpath(@__DIR__, "warfarin_oral.jnlme"))
-
-result = fit(model, pop, init_params;
+result = fit(model, df, init_params;
              outer_maxiter=300,
              run_covariance_step=true,
              optimizer = :LD_SLSQP,
@@ -82,7 +72,7 @@ println("\nTrue values:  TVCL=$(true_theta[1])  TVV=$(true_theta[2])  TVKA=$(tru
 # Observations table (PRED, IPRED, CWRES, IWRES, ETAs)
 # ---------------------------------------------------------------------------
 
-tab = sdtab(result, pop)
+tab = sdtab(result, df)
 println("\nObservations table (first 10 rows):")
 display(first(tab, 10))
 

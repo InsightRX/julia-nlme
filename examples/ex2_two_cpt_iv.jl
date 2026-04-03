@@ -7,6 +7,8 @@ Run from the package root:
 
 using JuliaNLME, DataFrames, Random, Printf, TidierPlots
 
+include("utils.jl")
+
 # ---------------------------------------------------------------------------
 # True population parameters
 # ---------------------------------------------------------------------------
@@ -16,41 +18,26 @@ true_omega  = [0.10, 0.10, 0.10, 0.10] # BSV variances (log-scale)
 true_sigma  = [0.01]                    # proportional residual error variance
 
 # ---------------------------------------------------------------------------
-# Simulate 15 subjects, IV bolus 100 mg
+# Parse model and simulate 15 subjects, IV bolus 100 mg
 # ---------------------------------------------------------------------------
 
 obs_times = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0, 24.0, 48.0, 72.0]
 
+model = parse_model_file(joinpath(@__DIR__, "two_cpt_iv.jnlme"))
+
 Random.seed!(123)
 
-function simulate_subject(id, dose, times, θ, ω_var, σ_var)
-    cl = θ[1] * exp(sqrt(ω_var[1]) * randn())
-    v1 = θ[2] * exp(sqrt(ω_var[2]) * randn())
-    q  = θ[3] * exp(sqrt(ω_var[3]) * randn())
-    v2 = θ[4] * exp(sqrt(ω_var[4]) * randn())
-    rows = []
-    # Dose record (IV bolus: AMT in central compartment, RATE=0)
-    push!(rows, (ID=id, TIME=0.0, AMT=dose, DV=missing, EVID=1, MDV=1, CMT=1, RATE=0.0))
-    for t in times
-        ipred = two_cpt_iv_bolus(; cl=cl, v1=v1, q=q, v2=v2, dose=dose, t=t)
-        dv    = ipred * (1 + sqrt(σ_var[1]) * randn())
-        push!(rows, (ID=id, TIME=t, AMT=missing, DV=max(dv, 0.001), EVID=0, MDV=0, CMT=1, RATE=0.0))
-    end
-    return rows
-end
+true_params = ModelParameters(
+    true_theta, [:TVCL, :TVV1, :TVQ, :TVV2],
+    OmegaMatrix(true_omega, [:ETA_CL, :ETA_V1, :ETA_Q, :ETA_V2]),
+    SigmaMatrix(true_sigma, [:PROP_ERR])
+)
 
-all_rows = []
-for id in 1:15
-    append!(all_rows, simulate_subject(id, 100.0, obs_times, true_theta, true_omega, true_sigma))
-end
-df = DataFrame(all_rows)
+df = create_dataset(1:15, 100.0, obs_times)
+sim_out = simulate(model, true_params, df)
+df[df.EVID .== 0, :DV] = sim_out.dv
 
-# ---------------------------------------------------------------------------
-# Load dataset
-# ---------------------------------------------------------------------------
-
-pop = read_data(df)
-println("Loaded $(length(pop)) subjects, $(sum(s->length(s.observations), pop.subjects)) observations")
+println("Simulated $(length(unique(df.ID))) subjects, $(sum(df.EVID .== 0)) observations")
 
 # ---------------------------------------------------------------------------
 # Build initial parameters (deliberately offset from truth)
@@ -65,12 +52,10 @@ init_params = ModelParameters(
 )
 
 # ---------------------------------------------------------------------------
-# Parse model and fit
+# Fit
 # ---------------------------------------------------------------------------
 
-model = parse_model_file(joinpath(@__DIR__, "two_cpt_iv.jnlme"))
-
-result = fit(model, pop, init_params;
+result = fit(model, df, init_params;
                     outer_maxiter=500,
                     run_covariance_step=true,
                     optimizer = :LD_SLSQP,
@@ -87,7 +72,7 @@ println("\nTrue values:  TVCL=$(true_theta[1])  TVV1=$(true_theta[2])  TVQ=$(tru
 # Observations table (PRED, IPRED, CWRES, IWRES, ETAs)
 # ---------------------------------------------------------------------------
 
-tab = sdtab(result, pop)
+tab = sdtab(result, df)
 println("\nObservations table (first 10 rows):")
 display(first(tab, 10))
 
@@ -133,7 +118,7 @@ init_diag = ModelParameters(
     SigmaMatrix([0.02], [:PROP_ERR])
 )
 
-result_diag = fit(model, pop, init_diag;
+result_diag = fit(model, df, init_diag;
                   outer_maxiter=500,
                   run_covariance_step=true,
                   verbose=false)
