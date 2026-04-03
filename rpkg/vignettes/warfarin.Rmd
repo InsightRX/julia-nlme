@@ -34,6 +34,43 @@ jnlme_setup(
 )
 ```
 
+### Startup time
+
+`jnlme_setup()` can feel slow the first time. Here is what is happening:
+
+| Event | First ever run | Later sessions |
+|---|---|---|
+| Julia startup | ~3–5 s | ~3–5 s (always) |
+| `using JuliaNLME` | **30–90 s** (one-time precompilation) | ~2–5 s (cache) |
+| First `jnlme_fit()` call | ~10–30 s (JIT compilation) | ~1–3 s (cache) |
+
+The one-time precompilation writes a compiled cache to `~/.julia/compiled/`
+and is never repeated unless JuliaNLME or its dependencies are updated.
+
+For regular use, build a **sysimage** — a precompiled snapshot of Julia +
+JuliaNLME that reduces total startup to ~1–2 s. Run this once:
+
+```{r}
+# Takes ~5–10 minutes, then never again
+JuliaCall::julia_eval('
+  import Pkg; Pkg.add("PackageCompiler")
+  using PackageCompiler
+  create_sysimage(
+    ["JuliaNLME", "DataFrames", "CSV"],
+    sysimage_path = "julianlme.so"
+  )
+')
+```
+
+Then pass the sysimage path to `jnlme_setup()`:
+
+```{r}
+jnlme_setup(
+  project       = "/path/to/julia-nlme",
+  sysimage_path = "julianlme.so"
+)
+```
+
 ## The Model File
 
 julianlme uses the same `.jnlme` model files as the Julia API. For this
