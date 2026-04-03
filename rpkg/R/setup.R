@@ -67,7 +67,7 @@ jnlme_setup <- function(project = Sys.getenv("JULIA_PROJECT", unset = NA),
                        gsub("\\\\", "/", project)))
   }
 
-  julia_eval("using JuliaNLME", need_return = FALSE)
+  julia_eval("using JuliaNLME", need_return = "None")
 
   # Load bridge functions
   bridge_path <- system.file("julia/bridge.jl", package = "julianlme")
@@ -93,6 +93,6 @@ jnlme_setup <- function(project = Sys.getenv("JULIA_PROJECT", unset = NA),
 #' @export
 jnlme_clear_cache <- function() {
   .check_setup()
-  julia_call("r_clear_cache", need_return = FALSE)
+  julia_call("r_clear_cache", need_return = "None")
   invisible(NULL)
 }

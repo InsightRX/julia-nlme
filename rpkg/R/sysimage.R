@@ -57,8 +57,8 @@ jnlme_build_sysimage <- function(path    = file.path(getwd(), .default_sysimage_
   )
   if (!have_pc) {
     message("julianlme: installing PackageCompiler.jl...")
-    julia_eval('import Pkg; Pkg.add("PackageCompiler")', need_return = FALSE)
-    julia_eval('using PackageCompiler', need_return = FALSE)
+    julia_eval('import Pkg; Pkg.add("PackageCompiler")', need_return = "None")
+    julia_eval('using PackageCompiler', need_return = "None")
   }
 
   warmup_path <- system.file("julia/precompile_warmup.jl", package = "julianlme")
@@ -77,7 +77,7 @@ jnlme_build_sysimage <- function(path    = file.path(getwd(), .default_sysimage_
       precompile_execution_file  = "%s"
     )',
     out_path, warmup_path
-  ), need_return = FALSE)
+  ), need_return = "None")
 
   if (!file.exists(path)) {
     stop("julianlme: sysimage was not created — check Julia output for errors.",
