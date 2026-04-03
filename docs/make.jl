@@ -23,6 +23,7 @@ makedocs(;
             "2-Cpt Oral + Covariates" => "examples/two_cpt_oral_cov.md",
             "ODE: Michaelis-Menten" => "examples/ode_mm.md",
         ],
+        "Running from R" => "r_interface.md",
         "API Reference" => "api.md",
     ],
     checkdocs = :exports,

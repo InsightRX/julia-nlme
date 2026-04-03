@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Running from R · JuliaNLME.jl</title><script data-outdated-warner src="../assets/warner.js"></script><link rel="canonical" href="https://insightrx.github.io/julia-nlme/r_interface/"/><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">JuliaNLME.jl</a></span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><a class="tocitem" href="../interfaces/">Interfaces</a></li><li><a class="tocitem" href="../dataset_format/">Dataset Format</a></li><li><a class="tocitem" href="../model_file_format/">Model File Format</a></li><li><a class="tocitem" href="../estimation_methods/">Estimation Methods</a></li><li><a class="tocitem" href="../diagnostics/">Diagnostics</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples/warfarin/">1-Cpt Oral (Warfarin)</a></li><li><a class="tocitem" href="../examples/two_cpt_iv/">2-Cpt IV Bolus</a></li><li><a class="tocitem" href="../examples/two_cpt_oral_cov/">2-Cpt Oral + Covariates</a></li><li><a class="tocitem" href="../examples/ode_mm/">ODE: Michaelis-Menten</a></li></ul></li><li class="is-active"><a class="tocitem" href>Running from R</a><ul class="internal"><li><a class="tocitem" href="#Installation"><span>Installation</span></a></li><li><a class="tocitem" href="#First-Time-Setup"><span>First-Time Setup</span></a></li><li><a class="tocitem" href="#Parsing-a-Model"><span>Parsing a Model</span></a></li><li><a class="tocitem" href="#Fitting-a-Model"><span>Fitting a Model</span></a></li><li><a class="tocitem" href="#Inspecting-Results"><span>Inspecting Results</span></a></li><li><a class="tocitem" href="#Simulating"><span>Simulating</span></a></li><li><a class="tocitem" href="#Multi-Threading"><span>Multi-Threading</span></a></li><li><a class="tocitem" href="#Memory-Management"><span>Memory Management</span></a></li><li><a class="tocitem" href="#Function-Reference"><span>Function Reference</span></a></li></ul></li><li><a class="tocitem" href="../api/">API Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Running from R</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Running from R</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/InsightRX/julia-nlme/blob/main/docs/src/r_interface.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Running-from-R"><a class="docs-heading-anchor" href="#Running-from-R">Running from R</a><a id="Running-from-R-1"></a><a class="docs-heading-anchor-permalink" href="#Running-from-R" title="Permalink"></a></h1><p>The <code>julianlme</code> R package wraps JuliaNLME&#39;s <code>fit()</code> and <code>simulate()</code> functions, letting you fit and simulate population PK/PD models from an R session without writing any Julia code. It uses <a href="https://non-contradiction.github.io/JuliaCall/">JuliaCall</a> to embed a Julia runtime inside R.</p><h2 id="Installation"><a class="docs-heading-anchor" href="#Installation">Installation</a><a id="Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Installation" title="Permalink"></a></h2><h3 id="Prerequisites"><a class="docs-heading-anchor" href="#Prerequisites">Prerequisites</a><a id="Prerequisites-1"></a><a class="docs-heading-anchor-permalink" href="#Prerequisites" title="Permalink"></a></h3><ul><li><strong>Julia</strong> ≥ 1.9, on PATH or accessible via the <code>julia_home</code> argument</li><li><strong>JuliaNLME</strong> installed in a Julia project (see <a href="../getting_started/#Getting-Started">Getting Started</a>)</li><li>R package <strong>JuliaCall</strong>: <code>install.packages(&quot;JuliaCall&quot;)</code></li></ul><h3 id="Install-julianlme"><a class="docs-heading-anchor" href="#Install-julianlme">Install julianlme</a><a id="Install-julianlme-1"></a><a class="docs-heading-anchor-permalink" href="#Install-julianlme" title="Permalink"></a></h3><p>The package lives in the <code>rpkg/</code> directory of the JuliaNLME repository:</p><pre><code class="language-r hljs"># With devtools
+devtools::install(&quot;/path/to/julia-nlme/rpkg&quot;)
+
+# Or from source
+install.packages(&quot;/path/to/julia-nlme/rpkg&quot;, repos = NULL, type = &quot;source&quot;)</code></pre><h2 id="First-Time-Setup"><a class="docs-heading-anchor" href="#First-Time-Setup">First-Time Setup</a><a id="First-Time-Setup-1"></a><a class="docs-heading-anchor-permalink" href="#First-Time-Setup" title="Permalink"></a></h2><p>Call <code>jnlme_setup()</code> once at the start of each R session. It starts the Julia runtime, activates the JuliaNLME project, and loads the bridge functions.</p><pre><code class="language-r hljs">library(julianlme)
+
+jnlme_setup(
+  project  = &quot;/path/to/julia-nlme&quot;,   # folder containing Project.toml
+  nthreads = 1                         # increase for parallel per-subject computation
+)</code></pre><h3 id="Startup-Time"><a class="docs-heading-anchor" href="#Startup-Time">Startup Time</a><a id="Startup-Time-1"></a><a class="docs-heading-anchor-permalink" href="#Startup-Time" title="Permalink"></a></h3><p>The first time <code>jnlme_setup()</code> is called on a machine, Julia precompiles JuliaNLME and its dependencies to native code. This is a one-time cost that writes a compiled cache to <code>~/.julia/compiled/</code>.</p><table><tr><th style="text-align: right">Event</th><th style="text-align: right">First ever run</th><th style="text-align: right">Later sessions</th></tr><tr><td style="text-align: right">Julia startup</td><td style="text-align: right">~3–5 s</td><td style="text-align: right">~3–5 s (always)</td></tr><tr><td style="text-align: right"><code>using JuliaNLME</code></td><td style="text-align: right"><strong>30–90 s</strong> (one-time precompilation)</td><td style="text-align: right">~2–5 s (cache)</td></tr><tr><td style="text-align: right">First <code>jnlme_fit()</code> call</td><td style="text-align: right">~10–30 s (JIT compilation)</td><td style="text-align: right">~1–3 s (cache)</td></tr></table><h3 id="Eliminating-Startup-Overhead-with-a-Sysimage"><a class="docs-heading-anchor" href="#Eliminating-Startup-Overhead-with-a-Sysimage">Eliminating Startup Overhead with a Sysimage</a><a id="Eliminating-Startup-Overhead-with-a-Sysimage-1"></a><a class="docs-heading-anchor-permalink" href="#Eliminating-Startup-Overhead-with-a-Sysimage" title="Permalink"></a></h3><p>A <strong>sysimage</strong> is a precompiled native snapshot of Julia + JuliaNLME. Loading it reduces total startup to ~1–2 s every session. Build one with <code>jnlme_build_sysimage()</code> — a one-time operation:</p><pre><code class="language-r hljs"># Takes 5–15 minutes; run once after installing or updating JuliaNLME
+sysimage &lt;- jnlme_build_sysimage(
+  path    = &quot;julianlme.so&quot;,          # use .dll on Windows
+  project = &quot;/path/to/julia-nlme&quot;
+)</code></pre><p>Then use the sysimage in every future session:</p><pre><code class="language-r hljs">jnlme_setup(
+  project       = &quot;/path/to/julia-nlme&quot;,
+  sysimage_path = &quot;julianlme.so&quot;
+)</code></pre><p><code>jnlme_build_sysimage()</code> installs PackageCompiler.jl if needed, then runs a warmup script that exercises all key code paths (FOCE, FOCE-I, ITS, SAEM, and <code>simulate()</code>). All JIT-compiled specializations — including ForwardDiff dual arithmetic — are baked into the image.</p><h2 id="Parsing-a-Model"><a class="docs-heading-anchor" href="#Parsing-a-Model">Parsing a Model</a><a id="Parsing-a-Model-1"></a><a class="docs-heading-anchor-permalink" href="#Parsing-a-Model" title="Permalink"></a></h2><p><code>jnlme_model()</code> parses a <code>.jnlme</code> file and returns an R object holding the compiled model and its default parameter values. The same model file format is used as in the Julia API.</p><pre><code class="language-r hljs">model &lt;- jnlme_model(&quot;/path/to/julia-nlme/examples/warfarin_oral.jnlme&quot;)
+print(model)</code></pre><pre><code class="nohighlight hljs">JuliaNLME model: WarfarinOneCmt
+  PK model:     one_cpt_oral
+  Error model:  proportional
+  THETA:        TVCL, TVV, TVKA
+  ETA:          ETA_CL, ETA_V, ETA_KA
+  SIGMA:        PROP_ERR</code></pre><p>The default initial parameter values from the <code>[parameters]</code> block are available as named R vectors and matrices:</p><pre><code class="language-r hljs">model$theta_init   # named numeric vector
+model$theta_lower  # lower bounds
+model$theta_upper  # upper bounds
+model$omega_init   # named matrix (BSV covariance)
+model$sigma_init   # named numeric vector</code></pre><h2 id="Fitting-a-Model"><a class="docs-heading-anchor" href="#Fitting-a-Model">Fitting a Model</a><a id="Fitting-a-Model-1"></a><a class="docs-heading-anchor-permalink" href="#Fitting-a-Model" title="Permalink"></a></h2><p>All three estimation methods are supported. Each takes a <code>jnlme_model</code> and a NONMEM-format <code>data.frame</code> and returns a <code>jnlme_fit</code> object.</p><h3 id="FOCE-/-FOCE-I"><a class="docs-heading-anchor" href="#FOCE-/-FOCE-I">FOCE / FOCE-I</a><a id="FOCE-/-FOCE-I-1"></a><a class="docs-heading-anchor-permalink" href="#FOCE-/-FOCE-I" title="Permalink"></a></h3><pre><code class="language-r hljs">result &lt;- jnlme_fit(
+  model,
+  data,
+  interaction         = TRUE,   # FOCE-I: recommended for proportional/combined error
+  run_covariance_step = TRUE,
+  verbose             = TRUE
+)</code></pre><h3 id="ITS-(fast-warm-start)"><a class="docs-heading-anchor" href="#ITS-(fast-warm-start)">ITS (fast warm-start)</a><a id="ITS-(fast-warm-start)-1"></a><a class="docs-heading-anchor-permalink" href="#ITS-(fast-warm-start)" title="Permalink"></a></h3><pre><code class="language-r hljs">result_its &lt;- jnlme_fit_its(model, data)</code></pre><h3 id="SAEM-(robust-for-complex-models)"><a class="docs-heading-anchor" href="#SAEM-(robust-for-complex-models)">SAEM (robust for complex models)</a><a id="SAEM-(robust-for-complex-models)-1"></a><a class="docs-heading-anchor-permalink" href="#SAEM-(robust-for-complex-models)" title="Permalink"></a></h3><pre><code class="language-r hljs">result_saem &lt;- jnlme_fit_saem(model, data)</code></pre><h2 id="Inspecting-Results"><a class="docs-heading-anchor" href="#Inspecting-Results">Inspecting Results</a><a id="Inspecting-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Inspecting-Results" title="Permalink"></a></h2><p>All fit functions return a <code>jnlme_fit</code> S3 object. Printing it gives a NONMEM-style summary:</p><pre><code class="language-r hljs">print(result)</code></pre><pre><code class="nohighlight hljs">JuliaNLME fit [converged]
+  Model:      WarfarinOneCmt
+  Method:     FOCE-I
+  OFV: -142.3    AIC: -128.3    BIC: -110.5
+  Subjects: 10   Observations: 110   Parameters: 7   Iterations: 47
+
+THETA:
+       Estimate     SE   RSE%
+TVCL     0.1338 0.0084    6.3
+TVV      8.0521 0.3412    4.2
+TVKA     1.0183 0.1024   10.1
+
+OMEGA (variance-covariance):
+        ETA_CL  ETA_V ETA_KA
+ETA_CL  0.0682  0.019  0.000
+ETA_V   0.0190  0.021  0.000
+ETA_KA  0.0000  0.000  0.381
+
+SIGMA:
+          Estimate     SE   RSE%
+PROP_ERR    0.0098 0.0014   14.7</code></pre><p>Individual fields:</p><pre><code class="language-r hljs">result$theta        # named numeric vector of fixed-effect estimates
+result$omega        # named matrix (BSV covariance)
+result$sigma        # named numeric vector (residual variance)
+result$se_theta     # standard errors for theta (NULL if covariance step failed)
+result$ofv          # objective function value (−2 log-likelihood)
+result$aic
+result$bic
+result$converged    # logical
+result$n_subjects
+result$n_obs
+result$n_iterations
+result$warnings     # character vector of any warnings issued during fitting</code></pre><p>S3 generics:</p><pre><code class="language-r hljs">coef(result)        # same as result$theta
+vcov(result)        # covariance matrix of packed parameters</code></pre><h3 id="Per-Subject-Diagnostics"><a class="docs-heading-anchor" href="#Per-Subject-Diagnostics">Per-Subject Diagnostics</a><a id="Per-Subject-Diagnostics-1"></a><a class="docs-heading-anchor-permalink" href="#Per-Subject-Diagnostics" title="Permalink"></a></h3><p><code>result$diagnostics</code> is a long-format data.frame with one row per observation:</p><pre><code class="language-r hljs">head(result$diagnostics)
+#   id    ipred     pred      iwres      cwres
+# 1  1 0.512453 0.478324  0.234123  0.182453
+# 2  1 0.982345 0.912453 -0.123457 -0.083453</code></pre><p><code>result$etas</code> is a wide-format data.frame with one row per subject:</p><pre><code class="language-r hljs">result$etas
+#   id  eta_ETA_CL   eta_ETA_V  eta_ETA_KA
+# 1  1  0.08212412  0.04123456 -0.24123456
+# 2  2 -0.12345679 -0.07890123  0.12345678</code></pre><p>Merge these with your original data.frame for plotting:</p><pre><code class="language-r hljs">obs        &lt;- data[data$EVID == 0, ]
+obs$IPRED  &lt;- result$diagnostics$ipred
+obs$PRED   &lt;- result$diagnostics$pred
+obs$CWRES  &lt;- result$diagnostics$cwres
+
+library(ggplot2)
+
+# DV vs IPRED
+ggplot(obs, aes(x = IPRED, y = DV)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = &quot;red&quot;, linetype = &quot;dashed&quot;) +
+  theme_bw()
+
+# CWRES vs TIME
+ggplot(obs, aes(x = TIME, y = CWRES)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = &quot;red&quot;, linetype = &quot;dashed&quot;) +
+  geom_hline(yintercept = c(-2, 2), color = &quot;grey50&quot;, linetype = &quot;dotted&quot;) +
+  theme_bw()</code></pre><h2 id="Simulating"><a class="docs-heading-anchor" href="#Simulating">Simulating</a><a id="Simulating-1"></a><a class="docs-heading-anchor-permalink" href="#Simulating" title="Permalink"></a></h2><p><code>jnlme_simulate()</code> draws individual parameters from the population distribution and simulates observations. It takes the fitted model and result and returns a data.frame.</p><pre><code class="language-r hljs"># Single simulation replicate
+sim &lt;- jnlme_simulate(model, data, result)
+
+# 200 replicates for a visual predictive check (VPC)
+vpc &lt;- jnlme_simulate(model, data, result, n_sims = 200)</code></pre><p>The returned data.frame has one row per observation per replicate, with columns <code>id</code>, <code>time</code>, <code>dv</code> (simulated), <code>pred</code>, <code>ipred</code>, and <code>_sim</code> (replicate index).</p><pre><code class="language-r hljs">library(dplyr)
+
+# 5th/50th/95th prediction interval across replicates
+pi &lt;- vpc |&gt;
+  group_by(time) |&gt;
+  summarise(p05 = quantile(dv, 0.05),
+            p50 = quantile(dv, 0.50),
+            p95 = quantile(dv, 0.95))
+
+ggplot() +
+  geom_ribbon(data = pi, aes(x = time, ymin = p05, ymax = p95),
+              fill = &quot;steelblue&quot;, alpha = 0.3) +
+  geom_line(data = pi, aes(x = time, y = p50), color = &quot;steelblue&quot;) +
+  geom_point(data = data[data$EVID == 0, ], aes(x = TIME, y = DV)) +
+  theme_bw()</code></pre><h2 id="Multi-Threading"><a class="docs-heading-anchor" href="#Multi-Threading">Multi-Threading</a><a id="Multi-Threading-1"></a><a class="docs-heading-anchor-permalink" href="#Multi-Threading" title="Permalink"></a></h2><p>Pass <code>nthreads</code> to both <code>jnlme_setup()</code> and the fit functions. The Julia runtime must be started with multiple threads — <code>jnlme_setup(nthreads = N)</code> sets <code>JULIA_NUM_THREADS</code> before starting Julia.</p><pre><code class="language-r hljs">jnlme_setup(project = &quot;/path/to/julia-nlme&quot;, nthreads = 4)
+
+result &lt;- jnlme_fit(model, data, nthreads = 4)</code></pre><p>See the <a href="../estimation_methods/#Multi-Threading">Multi-Threading</a> section of Estimation Methods for guidance on expected speedups by dataset size and model type.</p><h2 id="Memory-Management"><a class="docs-heading-anchor" href="#Memory-Management">Memory Management</a><a id="Memory-Management-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Management" title="Permalink"></a></h2><p>Model and fit result objects are cached on the Julia side by a UUID key held in the <code>jnlme_model</code> and <code>jnlme_fit</code> R objects. The cache persists for the lifetime of the Julia session. Call <code>jnlme_clear_cache()</code> to release memory between unrelated analyses:</p><pre><code class="language-r hljs">jnlme_clear_cache()</code></pre><h2 id="Function-Reference"><a class="docs-heading-anchor" href="#Function-Reference">Function Reference</a><a id="Function-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#Function-Reference" title="Permalink"></a></h2><table><tr><th style="text-align: right">Function</th><th style="text-align: right">Description</th></tr><tr><td style="text-align: right"><code>jnlme_setup()</code></td><td style="text-align: right">Initialize Julia and load JuliaNLME</td></tr><tr><td style="text-align: right"><code>jnlme_build_sysimage()</code></td><td style="text-align: right">Build a precompiled sysimage for fast startup</td></tr><tr><td style="text-align: right"><code>jnlme_model()</code></td><td style="text-align: right">Parse a <code>.jnlme</code> model file</td></tr><tr><td style="text-align: right"><code>jnlme_fit()</code></td><td style="text-align: right">Fit with FOCE or FOCE-I</td></tr><tr><td style="text-align: right"><code>jnlme_fit_its()</code></td><td style="text-align: right">Fit with ITS</td></tr><tr><td style="text-align: right"><code>jnlme_fit_saem()</code></td><td style="text-align: right">Fit with SAEM</td></tr><tr><td style="text-align: right"><code>jnlme_simulate()</code></td><td style="text-align: right">Simulate observations from a fitted model</td></tr><tr><td style="text-align: right"><code>jnlme_clear_cache()</code></td><td style="text-align: right">Release Julia-side object cache</td></tr></table></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples/ode_mm/">« ODE: Michaelis-Menten</a><a class="docs-footer-nextpage" href="../api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.25 on <span class="colophon-date" title="Friday 3 April 2026 15:55">Friday 3 April 2026</span>. Using Julia version 1.11.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
