@@ -1,0 +1,15 @@
+Package: julianlme
+Title: R Interface to JuliaNLME
+Version: 0.1.0
+Authors@R: c(person("InsightRX", role = c("aut", "cre"),
+                    email = "dev@insightrx.com"))
+Description: R wrapper around the JuliaNLME nonlinear mixed-effects modeling
+    library. Provides functions to fit population PK/PD models and simulate
+    from them, with the same model file format (.jnlme) and three estimation
+    methods: FOCE/FOCE-I, SAEM, and ITS.
+License: MIT + file LICENSE
+Imports:
+    JuliaCall (>= 0.17.0)
+Suggests:
+    testthat (>= 3.0.0)
+Encoding: UTF-8
