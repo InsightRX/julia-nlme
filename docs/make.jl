@@ -6,7 +6,7 @@ makedocs(;
     modules  = [JuliaNLME],
     authors  = "InsightRX",
     format   = Documenter.HTML(;
-        prettyurls = get(ENV, "CI", nothing) == "true",
+        prettyurls = true,
         canonical  = "https://insightrx.github.io/julia-nlme",
     ),
     pages = [
@@ -25,10 +25,4 @@ makedocs(;
         "API Reference" => "api.md",
     ],
     checkdocs = :exports,
-)
-
-deploydocs(;
-    repo = "github.com/insightrx/julia-nlme.git",
-    devbranch = "main",
-    push_preview = true,
 )
