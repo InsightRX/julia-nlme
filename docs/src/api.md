@@ -69,6 +69,9 @@ one_cpt_oral
 two_cpt_iv_bolus
 two_cpt_infusion
 two_cpt_oral
+three_cpt_iv_bolus
+three_cpt_infusion
+three_cpt_oral
 predict_subject
 ```
 

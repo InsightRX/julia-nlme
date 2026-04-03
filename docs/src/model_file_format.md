@@ -111,6 +111,9 @@ Available models:
 | `two_cpt_iv_bolus` | `cl, v1, q, v2` |
 | `two_cpt_infusion` | `cl, v1, q, v2` |
 | `two_cpt_oral` | `cl, v1, q, v2, ka` (optional: `f`) |
+| `three_cpt_iv_bolus` | `cl, v1, q2, v2, q3, v3` |
+| `three_cpt_infusion` | `cl, v1, q2, v2, q3, v3` |
+| `three_cpt_oral` | `cl, v1, q2, v2, q3, v3, ka` (optional: `f`) |
 
 Example:
 ```

@@ -55,4 +55,7 @@ See the [Getting Started](@ref) guide for a complete walkthrough.
 | `:two_cpt_iv_bolus` | IV bolus | `cl, v1, q, v2` |
 | `:two_cpt_infusion` | IV infusion | `cl, v1, q, v2` |
 | `:two_cpt_oral` | Oral | `cl, v1, q, v2, ka` (optional: `f`) |
+| `:three_cpt_iv_bolus` | IV bolus | `cl, v1, q2, v2, q3, v3` |
+| `:three_cpt_infusion` | IV infusion | `cl, v1, q2, v2, q3, v3` |
+| `:three_cpt_oral` | Oral | `cl, v1, q2, v2, q3, v3, ka` (optional: `f`) |
 | ODE (custom) | Any | User-defined via `[odes]` block |
