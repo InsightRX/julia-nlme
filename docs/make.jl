@@ -13,6 +13,7 @@ makedocs(;
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
         "Interfaces" => "interfaces.md",
+        "Dataset Format" => "dataset_format.md",
         "Model File Format" => "model_file_format.md",
         "Estimation Methods" => "estimation_methods.md",
         "Diagnostics" => "diagnostics.md",
