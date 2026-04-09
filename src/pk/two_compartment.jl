@@ -136,7 +136,7 @@ function _two_cpt_oral_impl(cl::C, v1::V1, q::Q, v2::V2, ka::K,
     Q_std = FD * ka_ * (k21 - β)  / (v1_ * αβ * (-safe_βka))
     P_lim = FD * ka_ * (k21 - α)  / (v1_ * αβ) * t_
     Q_lim = FD * ka_ * (k21 - β)  / (v1_ * αβ) * (-t_)
-    R     = -(FD * ka_ * (k21 - ka_)) / (v1_ * safe_αka * safe_βka)
+    R     = (FD * ka_ * (k21 - ka_)) / (v1_ * safe_αka * safe_βka)
     R     = ifelse(use_lim_α | use_lim_β, zero(T), R)
 
     if !use_lim_α && !use_lim_β
